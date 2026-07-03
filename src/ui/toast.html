@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'">
+  <title>KeySwitch Toast</title>
+  <style>
+    @font-face {
+      font-family: 'WixMadeforText';
+      font-style: normal; font-weight: 400; font-display: swap;
+      src: url('../../fonts/WixMadeforText-Regular-latin.woff2') format('woff2');
+      unicode-range: U+0000-00FF, U+2000-206F, U+FEFF, U+FFFD;
+    }
+    @font-face {
+      font-family: 'WixMadeforText';
+      font-style: normal; font-weight: 700; font-display: swap;
+      src: url('../../fonts/WixMadeforText-Bold-latin.woff2') format('woff2');
+      unicode-range: U+0000-00FF, U+2000-206F, U+FEFF, U+FFFD;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: transparent; overflow: hidden; }
+    body { font-family: 'WixMadeforText', system-ui, sans-serif; direction: rtl; }
+
+    /* Same visual language as the extension's toast: dark navy card with the
+       blue KeySwitch border, floating above everything. */
+    #toast {
+      background: #1a1a2e; color: #fff; padding: 10px 12px;
+      border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      border: 1px solid #4a90e2; font-size: 13px;
+      display: flex; flex-direction: column; width: 100%;
+      opacity: 0.92;
+    }
+    #toast:hover { opacity: 1; }
+
+    .head { display: flex; align-items: center; justify-content: center; position: relative; margin-bottom: 4px; }
+    .title { font-weight: 700; font-size: 12px; color: #7eb8f7; display: flex; align-items: center; gap: 6px; }
+    .close {
+      position: absolute; left: 0; top: -2px; background: none; border: none; color: #6a8abf;
+      font-size: 14px; cursor: pointer; padding: 2px 4px; line-height: 1; font-family: inherit;
+    }
+    .close:hover { color: #fff; }
+
+    .body { text-align: center; line-height: 1.6; word-break: break-word; }
+    .orig { color: #b0c4de; text-decoration: line-through; opacity: 0.7; }
+    .arrow { color: #4a90e2; margin: 0 6px; }
+    .conv { color: #fff; font-weight: 700; }
+    .meta { font-size: 11px; color: #7eb8f7; margin-top: 4px; }
+
+    .revert-btn {
+      cursor: pointer; border: none; border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 700;
+      color: #fff; font-family: inherit; background: linear-gradient(135deg, #4a90e2 0%, #357abd 100%);
+      margin: 10px auto 4px; width: 90%; display: none;
+    }
+    .revert-btn:hover { filter: brightness(1.1); }
+
+    .footer { display: none; justify-content: center; gap: 5px; align-items: center; margin-top: 4px; }
+    .footer span.link { cursor: pointer; color: #7eb8f7; font-size: 11px; text-decoration: underline; }
+    .footer span.sep { color: #555; font-size: 11px; margin: 0 3px; }
+  </style>
+</head>
+<body>
+  <div id="toast">
+    <div class="head">
+      <span class="title" id="toastTitle">🔄 KeySwitch</span>
+      <button class="close" id="closeBtn" title="סגור">✕</button>
+    </div>
+    <div class="body" id="toastBody"></div>
+    <button class="revert-btn" id="revertBtn">החזר טקסט מקורי ועצור</button>
+    <div class="footer" id="toastFooter">
+      <span class="link" id="disableAuto">השבת תרגום אוטומטי</span>
+      <span class="sep">|</span>
+      <span class="link" id="hideAutoToast">אל תציג שוב</span>
+    </div>
+  </div>
+  <script src="toast.js"></script>
+</body>
+</html>

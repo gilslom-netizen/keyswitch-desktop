@@ -1,0 +1,59 @@
+{
+  "name": "keyswitch-desktop",
+  "productName": "KeySwitch",
+  "version": "1.0.0",
+  "description": "KeySwitch — תיקון אוטומטי של טעויות שפת מקלדת עברית/אנגלית בכל תוכנה: Word, Excel, דפדפן, דוקס וכל היתר",
+  "author": "KeySwitch",
+  "license": "MIT",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/engine.test.js",
+    "lint": "node --check src/main.js && node --check src/settings-store.js && node --check src/native/win.js && node --check src/engine/shared_logic.js && node --check src/engine/dictionaries.js && node --check src/engine/keymap.js && node --check src/engine/autocorrect-engine.js && node --check src/ui/preload.js && node --check src/ui/settings.js && node --check src/ui/toast.js",
+    "dist": "electron-builder --win --publish never"
+  },
+  "dependencies": {
+    "koffi": "^2.9.0",
+    "uiohook-napi": "^1.5.5"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "app.keyswitch.desktop",
+    "productName": "KeySwitch",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "fonts/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/uiohook-napi/**",
+      "node_modules/koffi/**"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "KeySwitch-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "KeySwitch",
+      "runAfterFinish": true,
+      "include": "build/installer.nsh",
+      "installerLanguages": ["he_IL", "en_US"],
+      "artifactName": "KeySwitch-Setup-${version}.${ext}"
+    }
+  }
+}
