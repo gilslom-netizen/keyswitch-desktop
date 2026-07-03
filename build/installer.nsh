@@ -34,6 +34,17 @@
 !include nsDialogs.nsh
 !include LogicLib.nsh
 
+; electron-builder compiles this whole template TWICE: once with
+; BUILD_UNINSTALLER defined (to produce the embedded uninstaller stub) and
+; once without (the real installer). Our settings page, KSCFG parsing and
+; install-time writer are only ever invoked from the non-uninstaller pass
+; (customInit/customPageAfterChangeDir/customInstall are all inserted inside
+; "!ifndef BUILD_UNINSTALLER" blocks in electron-builder's own templates), so
+; without this guard the Functions below are defined but never called in the
+; uninstaller pass — NSIS's "not referenced" warning is treated as a fatal
+; error by electron-builder, aborting the whole build.
+!ifndef BUILD_UNINSTALLER
+
 Var KsDialog
 Var KsChkAC
 Var KsChkAT
@@ -280,3 +291,5 @@ FunctionEnd
     FileClose $9
   ${EndIf}
 !macroend
+
+!endif ; !BUILD_UNINSTALLER
