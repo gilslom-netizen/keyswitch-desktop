@@ -23,6 +23,7 @@
   "build": {
     "appId": "app.keyswitch.desktop",
     "productName": "KeySwitch",
+    "npmRebuild": false,
     "directories": {
       "output": "dist"
     },
