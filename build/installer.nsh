@@ -25,6 +25,12 @@
 ;      KSCFG token explicitly asks to override.
 ; =============================================================================
 
+; electron-builder injects this file via a command-line -X!include BEFORE its
+; own installer.nsi template runs "!include MUI2.nsh", so MUI_HEADER_TEXT and
+; friends are not yet defined at this point unless we pull them in ourselves.
+; MUI2.nsh has its own include guard, so re-including it here is a no-op once
+; the main template includes it later.
+!include MUI2.nsh
 !include nsDialogs.nsh
 !include LogicLib.nsh
 
