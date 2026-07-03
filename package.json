@@ -17,7 +17,7 @@
     "uiohook-napi": "^1.5.5"
   },
   "devDependencies": {
-    "electron": "^33.2.0",
+    "electron": "^43.0.0",
     "electron-builder": "^25.1.8"
   },
   "build": {
@@ -39,7 +39,12 @@
     ],
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "build/icon.png",
       "artifactName": "KeySwitch-Setup-${version}.${ext}"
@@ -53,7 +58,10 @@
       "shortcutName": "KeySwitch",
       "runAfterFinish": true,
       "include": "build/installer.nsh",
-      "installerLanguages": ["he_IL", "en_US"],
+      "installerLanguages": [
+        "he_IL",
+        "en_US"
+      ],
       "artifactName": "KeySwitch-Setup-${version}.${ext}"
     }
   }
