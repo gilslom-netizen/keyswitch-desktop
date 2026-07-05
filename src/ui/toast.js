@@ -27,20 +27,10 @@ ks.onToastShow((data) => {
     // this fires with zero user action during normal typing, so it must never
     // show the actual text (it could be a password/passphrase typed in the
     // wrong layout) — main.js doesn't even send it over IPC for this type.
-    titleEl.textContent = '⌨️ זוהתה שפה שגויה';
-    bodyEl.innerHTML = '';
-    const body = document.createElement('div');
+    // One sentence, no separate body text.
     const langName = data.targetLang === 'he' ? 'עברית' : 'אנגלית';
-    if (data.capsFixed && data.layoutSwitched) {
-      body.textContent = `תיקנו מילה שהוקלדה בפריסה שגויה — כיבינו את ה-CapsLock והחלפנו את שפת המקלדת ל${langName}.`;
-    } else if (data.layoutSwitched) {
-      body.textContent = `תיקנו מילה שהוקלדה בפריסה שגויה והחלפנו את שפת המקלדת ל${langName}.`;
-    } else if (data.capsFixed) {
-      body.textContent = `תיקנו מילה שהוקלדה בגלל CapsLock דלוק וכיבינו אותו.`;
-    } else {
-      body.textContent = `תיקנו מילה שהוקלדה בפריסה שגויה.`;
-    }
-    bodyEl.appendChild(body);
+    titleEl.textContent = `נראה שהתכוונת לכתוב ב${langName}. KeySwitch תיקן אוטומטית.`;
+    bodyEl.innerHTML = '';
     revertBtn.style.display = 'block';
     footerEl.style.display = 'flex';
   } else if (data.type === 'manual') {

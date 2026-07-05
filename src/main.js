@@ -253,8 +253,6 @@ function onAutoCorrected(info) {
     // even over the internal IPC channel to the toast window's renderer.
     showToast({
       type: 'auto',
-      capsFixed: info.capsFixed,
-      layoutSwitched: info.layoutSwitched,
       targetLang: info.targetLang
     });
   }
