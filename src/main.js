@@ -244,10 +244,15 @@ function onAutoCorrected(info) {
   settings.increment('totalAutoCorrectedWords', info.wordCount);
   broadcast('stats:changed', getStats());
   if (settings.get('showAutoToast') !== false) {
+    // Deliberately NOT sending info.original/info.converted here: unlike the
+    // manual-shortcut toast (an explicit, user-initiated action on text the
+    // user chose to select), this toast fires passively during normal typing
+    // with zero user intent — including inside password/passphrase fields,
+    // since the global keyboard hook has no concept of input field type. The
+    // fixed text could be a secret, so it must never leave the engine, not
+    // even over the internal IPC channel to the toast window's renderer.
     showToast({
       type: 'auto',
-      original: info.original,
-      converted: info.converted,
       capsFixed: info.capsFixed,
       layoutSwitched: info.layoutSwitched,
       targetLang: info.targetLang
