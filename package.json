@@ -13,6 +13,7 @@
     "dist": "electron-builder --win --publish never"
   },
   "dependencies": {
+    "electron-updater": "^6.3.9",
     "koffi": "^2.9.0",
     "uiohook-napi": "^1.5.5"
   },
@@ -24,6 +25,13 @@
     "appId": "app.keyswitch.desktop",
     "productName": "KeySwitch",
     "npmRebuild": false,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "gilslom-netizen",
+        "repo": "keyswitch-desktop"
+      }
+    ],
     "directories": {
       "output": "dist"
     },

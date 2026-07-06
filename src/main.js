@@ -13,6 +13,7 @@ const native = require('./native/win');
 const { SettingsStore } = require('./settings-store');
 const { convertFullText } = require('./engine/shared_logic');
 const { AutocorrectEngine } = require('./engine/autocorrect-engine');
+const { startHealthServer } = require('./health-server');
 
 const START_HIDDEN = process.argv.includes('--hidden');
 
@@ -23,6 +24,8 @@ let settingsWin = null;
 let toastWin = null;
 let toastHideTimer = null;
 let currentShortcut = null;
+let healthServer = null;
+let updateReady = false; // an update has been downloaded and will install on quit
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -43,6 +46,12 @@ function init() {
   createToastWindow();
   registerShortcut(settings.get('manualShortcut'));
   applyLoginItem();
+
+  // Loopback liveness endpoint so the Chrome extension can detect us and stand
+  // down (prevents double auto-correction). See health-server.js.
+  healthServer = startHealthServer(() => ({ version: app.getVersion() }));
+
+  setupAutoUpdate();
 
   settings.on('change', (key, value) => {
     if (key === 'manualShortcut') registerShortcut(value);
@@ -148,7 +157,7 @@ function createTray() {
 
 function refreshTrayMenu() {
   if (!tray) return;
-  const menu = Menu.buildFromTemplate([
+  const items = [
     { label: 'פתח את KeySwitch', click: showSettingsWindow },
     { type: 'separator' },
     {
@@ -157,11 +166,96 @@ function refreshTrayMenu() {
       checked: settings.get('autocorrectEnabled') !== false,
       click: (item) => settings.set('autocorrectEnabled', item.checked)
     },
-    { type: 'separator' },
+    { type: 'separator' }
+  ];
+  // Once an update has been downloaded, offer to restart into it now; otherwise
+  // offer a manual check.
+  if (updateReady) {
+    items.push({ label: '🔄 התקן עדכון והפעל מחדש', click: () => quitAndInstallUpdate() });
+  } else {
+    items.push({ label: 'בדוק עדכונים', click: () => checkForUpdatesManually() });
+  }
+  items.push(
     { label: 'תרומה למפתחים ❤️', click: () => shell.openExternal('https://www.paypal.com/ncp/payment/TCZCRSCYJRR9G') },
     { label: 'יציאה', click: () => { app.isQuitting = true; app.quit(); } }
-  ]);
-  tray.setContextMenu(menu);
+  );
+  tray.setContextMenu(Menu.buildFromTemplate(items));
+}
+
+// ---------------------------------------------------------------------------
+// AUTO-UPDATE (electron-updater against GitHub Releases)
+// ---------------------------------------------------------------------------
+// On every launch (and every 6 hours after) the app checks the repo's GitHub
+// Releases for a newer version, downloads it in the background, and installs it
+// the next time the app quits — so users are NOT stuck forever on whatever
+// version they first downloaded. A tray item also lets them check on demand or
+// restart-to-update immediately once one is ready.
+//
+// Requires the build to publish `latest.yml` next to the installer in each
+// GitHub Release (the CI workflow uploads it), and the `publish` block in
+// package.json. In an unpacked/dev run (`app.isPackaged === false`) the updater
+// is skipped, because there is no code signature or app-update.yml to read.
+let autoUpdater = null;
+let manualUpdateCheck = false;
+
+function setupAutoUpdate() {
+  if (!app.isPackaged) return;
+  try {
+    ({ autoUpdater } = require('electron-updater'));
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+
+    autoUpdater.on('update-available', (info) => {
+      if (manualUpdateCheck) {
+        showToast({ type: 'info', text: `גרסה ${info.version} נמצאה — מורידה ברקע...` });
+      }
+    });
+    autoUpdater.on('update-not-available', () => {
+      if (manualUpdateCheck) {
+        showToast({ type: 'info', text: 'אתם משתמשים בגרסה העדכנית ביותר 🎉' });
+        manualUpdateCheck = false;
+      }
+    });
+    autoUpdater.on('update-downloaded', (info) => {
+      updateReady = true;
+      manualUpdateCheck = false;
+      refreshTrayMenu();
+      showToast({ type: 'info', text: `גרסה ${info.version} מוכנה — תותקן ביציאה מהתוכנה` });
+    });
+    autoUpdater.on('error', (err) => {
+      if (manualUpdateCheck) {
+        showToast({ type: 'info', text: 'בדיקת העדכונים נכשלה — נסו שוב מאוחר יותר' });
+        manualUpdateCheck = false;
+      }
+      console.error('[KeySwitch] auto-update error:', err && err.message);
+    });
+
+    autoUpdater.checkForUpdates().catch(() => {});
+    setInterval(() => {
+      if (!updateReady) autoUpdater.checkForUpdates().catch(() => {});
+    }, 6 * 60 * 60 * 1000);
+  } catch (e) {
+    console.error('[KeySwitch] failed to init auto-update:', e);
+  }
+}
+
+function checkForUpdatesManually() {
+  if (!app.isPackaged) {
+    showToast({ type: 'info', text: 'בדיקת עדכונים זמינה רק בגרסה המותקנת' });
+    return;
+  }
+  if (!autoUpdater) { setupAutoUpdate(); }
+  if (!autoUpdater) return;
+  manualUpdateCheck = true;
+  showToast({ type: 'info', text: 'בודק עדכונים...' });
+  autoUpdater.checkForUpdates().catch(() => {});
+}
+
+function quitAndInstallUpdate() {
+  if (!autoUpdater) return;
+  app.isQuitting = true;
+  // isSilent=false (show the installer), isForceRunAfter=true (relaunch after).
+  autoUpdater.quitAndInstall(false, true);
 }
 
 // ---------------------------------------------------------------------------
@@ -325,5 +419,6 @@ app.on('window-all-closed', (e) => {
 app.on('before-quit', () => {
   try { engine && engine.stop(); } catch (e) {}
   try { globalShortcut.unregisterAll(); } catch (e) {}
+  try { healthServer && healthServer.close(); } catch (e) {}
   try { settings && settings.save(); } catch (e) {}
 });

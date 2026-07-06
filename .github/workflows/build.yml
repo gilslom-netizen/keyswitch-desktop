@@ -35,11 +35,18 @@ jobs:
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: KeySwitch-Setup
-          path: dist/KeySwitch-Setup-*.exe
+          path: |
+            dist/KeySwitch-Setup-*.exe
+            dist/latest.yml
           if-no-files-found: error
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@e7a8f85e1c67a31e6ed99a94b41bd0b71bbee6b8 # v2.0.9
         with:
-          files: dist/KeySwitch-Setup-*.exe
+          # latest.yml (+ the .exe.blockmap) MUST ship in the release so
+          # electron-updater can discover and verify new versions.
+          files: |
+            dist/KeySwitch-Setup-*.exe
+            dist/KeySwitch-Setup-*.exe.blockmap
+            dist/latest.yml
           generate_release_notes: true
