@@ -3,6 +3,7 @@
 
 const ks = window.keyswitch;
 
+const toastEl = document.getElementById('toast');
 const titleEl = document.getElementById('toastTitle');
 const bodyEl = document.getElementById('toastBody');
 const revertBtn = document.getElementById('revertBtn');
@@ -21,16 +22,21 @@ function trim(s, n) {
 ks.onToastShow((data) => {
   revertBtn.style.display = 'none';
   footerEl.style.display = 'none';
+  // 'auto' toast is semi-transparent and brightens on hover, exactly like the
+  // browser extension's auto-detect toast; every other toast is fully opaque.
+  document.body.classList.toggle('is-auto', data.type === 'auto');
 
   if (data.type === 'auto') {
-    // Intentionally generic, like the browser extension's auto-detect toast:
-    // this fires with zero user action during normal typing, so it must never
-    // show the actual text (it could be a password/passphrase typed in the
-    // wrong layout) — main.js doesn't even send it over IPC for this type.
-    // One sentence, no separate body text.
-    const langName = data.targetLang === 'he' ? 'עברית' : 'אנגלית';
-    titleEl.textContent = `נראה שהתכוונת לכתוב ב${langName}. KeySwitch תיקן אוטומטית.`;
+    // Matches the extension's auto-detect toast: a generic title (never the
+    // corrected text itself — it could be a password mistyped in the wrong
+    // layout; main.js doesn't even send it), the revert action, and the
+    // disable/hide footer links. Body wording is adapted for the desktop,
+    // which SWITCHES the keyboard layout rather than live-remapping keystrokes.
+    titleEl.textContent = 'זוהתה שפה שגויה ⌨️';
     bodyEl.innerHTML = '';
+    const body = document.createElement('div');
+    body.textContent = 'תיקנו את המילה אוטומטית והחלפנו את שפת המקלדת.';
+    bodyEl.appendChild(body);
     revertBtn.style.display = 'block';
     footerEl.style.display = 'flex';
   } else if (data.type === 'manual') {
@@ -46,7 +52,7 @@ ks.onToastShow((data) => {
   }
 
   requestAnimationFrame(() => {
-    const h = document.getElementById('toast').getBoundingClientRect().height;
+    const h = toastEl.getBoundingClientRect().height;
     ks.toastResize(h + 8);
   });
 });

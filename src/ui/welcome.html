@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'">
+  <title>ברוכים הבאים ל-KeySwitch</title>
+  <style>
+    @font-face {
+      font-family: 'WixMadeforText';
+      font-style: normal; font-weight: 400; font-display: swap;
+      src: url('../../fonts/WixMadeforText-Regular-latin.woff2') format('woff2');
+      unicode-range: U+0000-00FF, U+2000-206F, U+FEFF, U+FFFD;
+    }
+    @font-face {
+      font-family: 'WixMadeforText';
+      font-style: normal; font-weight: 700; font-display: swap;
+      src: url('../../fonts/WixMadeforText-Bold-latin.woff2') format('woff2');
+      unicode-range: U+0000-00FF, U+2000-206F, U+FEFF, U+FFFD;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'WixMadeforText', system-ui, sans-serif;
+      background: #1a1a2e; color: #f0f0f0; direction: rtl;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
+      user-select: none;
+    }
+    .card {
+      background: #16213e; border: 1px solid #0f3460; border-radius: 14px;
+      width: 100%; max-width: 460px; padding: 28px; box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+    }
+    .head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+    .head img { width: 40px; height: 40px; border-radius: 8px; }
+    .head h1 { font-size: 20px; color: #fff; }
+
+    .done-title { font-size: 19px; font-weight: 800; color: #fff; margin: 14px 0 6px; }
+    .done-sub { font-size: 13.5px; color: #b0c4de; line-height: 1.6; margin-bottom: 18px; }
+    .tip {
+      background: #1a1a2e; border: 1px solid #0f3460; border-radius: 10px;
+      padding: 12px 14px; margin-bottom: 10px;
+    }
+    .tip-title { font-size: 14px; font-weight: 700; color: #7eb8f7; margin-bottom: 4px; }
+    .tip-body { font-size: 12.5px; color: #d0d8e8; line-height: 1.65; }
+    .tip-body kbd {
+      background: #0f3460; color: #7eb8f7; border-radius: 4px; padding: 1px 6px;
+      font-size: 11px; font-family: monospace; white-space: nowrap; direction: ltr; display: inline-block;
+    }
+    .try-title { font-size: 14.5px; font-weight: 700; color: #fff; margin: 18px 0 4px; }
+    .try-sub { font-size: 12.5px; color: #b0c4de; line-height: 1.6; margin-bottom: 12px; }
+    .try-sub code {
+      background: #0f3460; color: #7eb8f7; border-radius: 4px; padding: 1px 6px;
+      font-family: monospace; direction: ltr; display: inline;
+    }
+    .try-row { display: flex; gap: 10px; }
+    .link-btn {
+      flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px;
+      border: 1px solid #e3e8ef; border-radius: 10px; padding: 11px 10px;
+      font-size: 13.5px; font-weight: 700; color: #202124; direction: ltr; background: #fff;
+      cursor: pointer; font-family: inherit;
+      transition: transform 0.12s ease, box-shadow 0.15s ease, border-color 0.15s;
+    }
+    .link-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,0,0,0.35); border-color: #c8d0dc; }
+    .link-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .link-btn.wa { background: #25D366; color: #fff; border-color: #1ebe5d; }
+    .link-btn.wa:hover { background: #20bd5a; border-color: #1aa551; }
+
+    .done-btn {
+      width: 100%; background: #4a90e2; color: #fff; border: none; border-radius: 9px;
+      padding: 12px; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 20px;
+      font-family: inherit; transition: background 0.15s;
+    }
+    .done-btn:hover { background: #357abd; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="head">
+      <img src="../../assets/icon48.png" alt="icon" />
+      <h1>KeySwitch</h1>
+    </div>
+
+    <div class="done-title">הכל מוכן, KeySwitch פועל ברקע! 🎉</div>
+    <div class="done-sub">שלושה דברים קטנים ששווה לדעת כדי להפיק מהתוכנה את המקסימום:</div>
+
+    <div class="tip">
+      <div class="tip-title">1. תיקון אוטומטי בכל תוכנה ⚡</div>
+      <div class="tip-body">פשוט תקלידו כרגיל. אם מילה נכתבה בטעות בפריסת מקלדת שגויה — KeySwitch יתקן אותה ויחליף את שפת המקלדת אוטומטית, בכל תוכנה: Word, Excel, דפדפן, דוקס ועוד.</div>
+    </div>
+
+    <div class="tip">
+      <div class="tip-title">2. הקיצור שיחסוך לכם זמן ⌨️</div>
+      <div class="tip-body">רוצים להמיר טקסט קיים? סמנו אותו ולחצו על <kbd>Alt + Shift + J</kbd> כדי להחליף את שפתו ברגע — בכל מקום.</div>
+    </div>
+
+    <div class="tip">
+      <div class="tip-title">3. גישה מהירה להגדרות 🔎</div>
+      <div class="tip-body">חפשו "KeySwitch" בשורת החיפוש של Windows, או לחצו על האייקון של KeySwitch במגש המערכת (ליד השעון) — כדי לפתוח את ההגדרות בכל עת.</div>
+    </div>
+
+    <div class="try-title">🚀 בואו ננסה!</div>
+    <div class="try-sub">פתחו כל תוכנה או אתר, הקלידו משהו בטעות בפריסה הלא נכונה (למשל <code>akuo</code>) ותראו את KeySwitch מתקן לבד:</div>
+    <div class="try-row">
+      <button class="link-btn" data-url="https://mail.google.com/">
+        <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="#4caf50" d="M45 16.2l-5 2.75-5 4.75L35 40h7c1.657 0 3-1.343 3-3V16.2z"/><path fill="#1e88e5" d="M3 16.2l3.614 1.71L13 23.7V40H6c-1.657 0-3-1.343-3-3V16.2z"/><polygon fill="#e53935" points="35,11.2 24,19.45 13,11.2 12,17 13,23.7 24,31.95 35,23.7 36,17"/><path fill="#c62828" d="M3 12.298V16.2l10 7.5V11.2L9.876 8.859A3.997 3.997 0 0 0 7.298 8 4.3 4.3 0 0 0 3 12.298z"/><path fill="#fbc02d" d="M45 12.298V16.2l-10 7.5V11.2l3.124-2.341A3.997 3.997 0 0 1 40.702 8 4.3 4.3 0 0 1 45 12.298z"/></svg>
+        Gmail
+      </button>
+      <button class="link-btn wa" data-url="https://web.whatsapp.com/">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="#fff" d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347zM11.99 0C5.37 0 0 5.373 0 12c0 2.117.554 4.103 1.524 5.825L0 24l6.335-1.652A11.954 11.954 0 0 0 12 24c6.627 0 12-5.373 12-12S18.617 0 11.99 0zM12 22c-1.848 0-3.57-.507-5.045-1.388l-.361-.214-3.741.98.998-3.648-.235-.374A9.96 9.96 0 0 1 2 12c0-5.514 4.486-10 10-10s10 4.486 10 10-4.486 10-10 10z"/></svg>
+        Web WhatsApp
+      </button>
+    </div>
+
+    <button class="done-btn" id="doneBtn">מעולה, בואו נתחיל!</button>
+  </div>
+
+  <script src="welcome.js"></script>
+</body>
+</html>

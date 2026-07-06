@@ -36,6 +36,7 @@ function makeStub() {
     sendUnicodeText: () => {},
     sendBackspaces: () => {},
     sendCtrlCombo: () => {},
+    beep: () => {},
     VK
   };
 }
@@ -62,6 +63,7 @@ function makeWin() {
   const LoadKeyboardLayoutW = user32.func('void* __stdcall LoadKeyboardLayoutW(str16, uint32)');
   const PostMessageW = user32.func('bool __stdcall PostMessageW(void*, uint32, uint64, void*)');
   const SendInput = user32.func('uint32 __stdcall SendInput(uint32, KS_INPUT*, int32)');
+  const MessageBeep = user32.func('bool __stdcall MessageBeep(uint32)');
 
   const INPUT_KEYBOARD = 1;
   const INPUT_SIZE = koffi.sizeof(INPUT);
@@ -160,6 +162,12 @@ function makeWin() {
         keyInput(letterVk, 0, KEYEVENTF.KEYUP),
         keyInput(VK.CONTROL, 0, KEYEVENTF.KEYUP)
       ]);
+    },
+
+    // Short audible feedback for the "sound only" auto-correction mode.
+    // 0xFFFFFFFF = a simple standard beep (no bundled sound asset needed).
+    beep() {
+      try { MessageBeep(0xFFFFFFFF); } catch (e) {}
     }
   };
 }

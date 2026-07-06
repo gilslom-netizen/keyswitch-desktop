@@ -17,10 +17,18 @@ const { EventEmitter } = require('events');
 const DEFAULTS = {
   autocorrectEnabled: true,
   showAutoToast: true,
-  showManualToast: true,
+  // Manual-shortcut toast is OFF by default: pressing the shortcut is an
+  // explicit, deliberate action, so a confirmation popup every time is noise.
+  showManualToast: false,
+  // Auto-correction feedback when showAutoToast is off: play a short system
+  // beep instead of showing the toast. Default off (the toast is the default
+  // feedback). toast on  -> toast shown (beep ignored);
+  // toast off + sound on -> beep only; toast off + sound off -> fully silent.
+  autoSound: false,
   primaryLang: 'he',
   manualShortcut: 'Alt+Shift+J',
   launchAtLogin: true,
+  welcomeShown: false, // one-time first-run welcome screen
   totalCorrectedWords: 0,
   totalAutoCorrectedWords: 0,
   totalManualCorrectedWords: 0,

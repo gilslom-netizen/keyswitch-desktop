@@ -28,9 +28,13 @@
       border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
       border: 1px solid #4a90e2; font-size: 13px;
       display: flex; flex-direction: column; width: 100%;
-      opacity: 0.92;
+      opacity: 1;
+      transition: opacity 0.2s ease;
     }
-    #toast:hover { opacity: 1; }
+    /* Auto-detect toast lingers semi-transparent (like the extension) and
+       brightens to full opacity on hover so it's readable when you look at it. */
+    body.is-auto #toast { opacity: 0.5; }
+    body.is-auto #toast:hover { opacity: 1; }
 
     .head { display: flex; align-items: center; justify-content: center; position: relative; margin-bottom: 4px; }
     .title { font-weight: 700; font-size: 12px; color: #7eb8f7; display: flex; align-items: center; gap: 6px; }

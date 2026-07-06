@@ -62,10 +62,10 @@ Var KsWriteCfg
 ; --- Find a KSCFG token. CLI (/KSCFG=xxxxx) wins over the file name. ---------
 Function KsParseCfg
   StrCpy $KsHasToken "0"
-  ; defaults (match the extension's defaults)
+  ; defaults (match the app's built-in settings defaults)
   StrCpy $KsValAC "1"
   StrCpy $KsValAT "1"
-  StrCpy $KsValMT "1"
+  StrCpy $KsValMT "0" ; manual-shortcut toast OFF by default (deliberate action)
   StrCpy $KsValAS "1"
   StrCpy $KsValLang "h"
 

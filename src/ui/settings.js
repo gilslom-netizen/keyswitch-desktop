@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const settingsView = document.getElementById('settingsView');
   const mainView = document.getElementById('mainView');
   const autocorrectToggle = document.getElementById('autocorrectToggle');
-  const showAutoToastToggle = document.getElementById('showAutoToastToggle');
+  const autoNotifySelect = document.getElementById('autoNotifySelect');
   const showManualToastToggle = document.getElementById('showManualToastToggle');
   const primaryLangSelect = document.getElementById('primaryLangSelect');
   const launchAtLoginToggle = document.getElementById('launchAtLoginToggle');
@@ -59,9 +59,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // --- Load settings -------------------------------------------------------
+  // Map the two underlying booleans (showAutoToast / autoSound) to the single
+  // 3-way "auto notification" dropdown and back.
+  const notifyModeFromSettings = (st) =>
+    (st.showAutoToast !== false) ? 'toast' : (st.autoSound ? 'sound' : 'silent');
+
   const s = await ks.getSettings();
   autocorrectToggle.checked = s.autocorrectEnabled !== false;
-  showAutoToastToggle.checked = s.showAutoToast !== false;
+  autoNotifySelect.value = notifyModeFromSettings(s);
   showManualToastToggle.checked = s.showManualToast !== false;
   primaryLangSelect.value = s.primaryLang || 'he';
   launchAtLoginToggle.checked = s.launchAtLogin !== false;
@@ -71,7 +76,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!s.platformSupported) document.getElementById('unsupportedBox').style.display = 'block';
 
   autocorrectToggle.addEventListener('change', () => ks.setSetting('autocorrectEnabled', autocorrectToggle.checked));
-  showAutoToastToggle.addEventListener('change', () => ks.setSetting('showAutoToast', showAutoToastToggle.checked));
+  autoNotifySelect.addEventListener('change', () => {
+    const mode = autoNotifySelect.value;
+    ks.setSetting('showAutoToast', mode === 'toast');
+    ks.setSetting('autoSound', mode === 'sound');
+  });
   showManualToastToggle.addEventListener('change', () => ks.setSetting('showManualToast', showManualToastToggle.checked));
   primaryLangSelect.addEventListener('change', () => ks.setSetting('primaryLang', primaryLangSelect.value));
   launchAtLoginToggle.addEventListener('change', () => ks.setSetting('launchAtLogin', launchAtLoginToggle.checked));
@@ -128,7 +137,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   ks.onSettingsChanged(({ key, value }) => {
     if (key === 'autocorrectEnabled') autocorrectToggle.checked = value !== false;
-    if (key === 'showAutoToast') showAutoToastToggle.checked = value !== false;
+    // showAutoToast / autoSound both feed the single auto-notification dropdown;
+    // re-read the full settings to resolve the resulting mode when either changes.
+    if (key === 'showAutoToast' || key === 'autoSound') {
+      ks.getSettings().then((cur) => { autoNotifySelect.value = notifyModeFromSettings(cur); });
+    }
     if (key === 'showManualToast') showManualToastToggle.checked = value !== false;
     if (key === 'primaryLang') primaryLangSelect.value = value || 'he';
     if (key === 'launchAtLogin') launchAtLoginToggle.checked = value !== false;

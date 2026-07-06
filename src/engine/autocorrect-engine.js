@@ -88,6 +88,10 @@ class AutocorrectEngine extends EventEmitter {
     this.confidence = new Map(); // windowId -> { window: [], lang }
     this.lastFix = null;
 
+    // Screen-space rectangle of the currently visible toast window, if any, so
+    // clicks on it don't reset the run (set by main.js). null = no protection.
+    this.protectedRect = null;
+
     this.uiohook = null;
     this._onKeydown = this._onKeydown.bind(this);
     this._onKeyup = this._onKeyup.bind(this);
@@ -129,6 +133,16 @@ class AutocorrectEngine extends EventEmitter {
 
   resetRun() {
     this.buffer = '';
+    // Clear the per-window "confidence" accumulator too. It tracks how many
+    // correct words the user typed in a row so a genuine word isn't mistaken
+    // for a layout error mid-burst — but it must NOT survive across typing
+    // bursts. On surfaces with a stable window handle (e.g. the Windows search
+    // box), leaving a field and returning keeps the same windowId, so without
+    // this the leftover confidence could silently suppress the FIRST mistake
+    // after you come back — the "sometimes it stops auto-correcting when I
+    // return to the field" bug. A fresh burst must start with a clean slate so
+    // detection is always live.
+    this.confidence.clear();
     this._endFixTracking();
   }
 
@@ -137,8 +151,18 @@ class AutocorrectEngine extends EventEmitter {
     this.emit('fix-tracking-ended');
   }
 
-  _onMousedown() {
+  _onMousedown(e) {
     if (Date.now() < this.ignoreUntil) return;
+    // A click INSIDE our own toast window (e.g. the "החזר טקסט מקורי ועצור"
+    // button) must not tear down the run — otherwise the global mouse hook
+    // would clear lastFix before the button's own handler runs, and the revert
+    // would find nothing to undo. main.js keeps protectedRect in sync with the
+    // visible toast's screen bounds.
+    const r = this.protectedRect;
+    if (r && e && typeof e.x === 'number' && typeof e.y === 'number' &&
+        e.x >= r.x && e.x <= r.x + r.width && e.y >= r.y && e.y <= r.y + r.height) {
+      return;
+    }
     this.resetRun();
   }
 

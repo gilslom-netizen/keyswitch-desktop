@@ -21,8 +21,10 @@ let settings;
 let engine;
 let tray = null;
 let settingsWin = null;
+let welcomeWin = null;
 let toastWin = null;
 let toastHideTimer = null;
+let currentToastType = null; // 'auto' | 'manual' | 'info' | null — which toast is showing
 let currentShortcut = null;
 let healthServer = null;
 let updateReady = false; // an update has been downloaded and will install on quit
@@ -42,6 +44,14 @@ function init() {
 
   engine = new AutocorrectEngine({ native, settings });
   engine.on('corrected', onAutoCorrected);
+  // The auto-toast lives for as long as the correction's "session" does: when
+  // the engine stops tracking the last fix (user left the field / clicked /
+  // started a new burst) or the fix was reverted, dismiss the toast — matching
+  // the extension's "disappears when you leave the field" behavior. Only the
+  // auto-toast follows the session; a manual/info toast keeps its own timer.
+  const dismissAutoToast = () => { if (currentToastType === 'auto') hideToast(); };
+  engine.on('fix-tracking-ended', dismissAutoToast);
+  engine.on('reverted', dismissAutoToast);
   const hookOk = engine.start();
 
   createTray();
@@ -62,10 +72,46 @@ function init() {
     broadcast('settings:changed', { key, value });
   });
 
-  if (!START_HIDDEN) showSettingsWindow();
+  // First run after install (the installer launches us via runAfterFinish):
+  // show the styled welcome/onboarding screen once instead of the settings
+  // window. On every later launch, behave normally.
+  if (!START_HIDDEN) {
+    if (settings.get('welcomeShown') !== true) showWelcomeWindow();
+    else showSettingsWindow();
+  }
   if (native.isSupported && !hookOk) {
     showToast({ type: 'info', text: 'שגיאה בהפעלת מנוע התיקון האוטומטי — נסו להפעיל מחדש' });
   }
+}
+
+function showWelcomeWindow() {
+  if (welcomeWin && !welcomeWin.isDestroyed()) { welcomeWin.show(); welcomeWin.focus(); return; }
+  welcomeWin = new BrowserWindow({
+    width: 520,
+    height: 720,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    title: 'ברוכים הבאים ל-KeySwitch',
+    icon: path.join(__dirname, '..', 'assets', 'icon128.png'),
+    backgroundColor: '#1a1a2e',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'ui', 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      devTools: !app.isPackaged
+    }
+  });
+  welcomeWin.removeMenu();
+  welcomeWin.loadFile(path.join(__dirname, 'ui', 'welcome.html'));
+  // Mark shown on ANY close (button or the window's X) so it's truly one-time.
+  welcomeWin.on('closed', () => {
+    welcomeWin = null;
+    if (settings) settings.set('welcomeShown', true);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -152,29 +198,55 @@ function createToastWindow() {
   toastWin.on('closed', () => { toastWin = null; });
 }
 
+// All toasts are pinned to the BOTTOM-LEFT corner of the primary display's
+// work area, matching the browser extension's auto-toast placement.
+const TOAST_MARGIN = 20;
 function positionToast() {
   if (!toastWin) return;
   const { workArea } = screen.getPrimaryDisplay();
   const [w, h] = toastWin.getSize();
   toastWin.setPosition(
-    Math.round(workArea.x + (workArea.width - w) / 2),
-    Math.round(workArea.y + workArea.height - h - 24)
+    Math.round(workArea.x + TOAST_MARGIN),
+    Math.round(workArea.y + workArea.height - h - TOAST_MARGIN)
   );
+  updateToastProtectedRect();
+}
+
+// Keep the engine's mouse-click protection rectangle aligned with the toast's
+// on-screen bounds while it is visible (so clicking the revert button doesn't
+// tear down the pending fix — see engine._onMousedown).
+function updateToastProtectedRect() {
+  if (!engine) return;
+  if (toastWin && !toastWin.isDestroyed() && toastWin.isVisible()) {
+    engine.protectedRect = toastWin.getBounds();
+  } else {
+    engine.protectedRect = null;
+  }
 }
 
 function showToast(payload) {
   if (!toastWin || toastWin.isDestroyed()) createToastWindow();
+  currentToastType = payload.type || 'info';
   positionToast();
   toastWin.webContents.send('toast:show', payload);
   toastWin.showInactive();
+  updateToastProtectedRect();
   clearTimeout(toastHideTimer);
-  const ttl = payload.type === 'auto' ? 8000 : (payload.type === 'manual' ? 5000 : 3500);
+  // The auto-correction toast mirrors the extension: it is NOT dismissed on a
+  // short fixed timer — it lingers (semi-transparent) until the correction's
+  // "session" ends, i.e. the user leaves the field / clicks / starts a new
+  // burst (engine emits 'fix-tracking-ended' / 'reverted', wired in init()).
+  // A generous safety cap only guards against a missed end-event so it can
+  // never get stuck on screen forever. Manual/info toasts keep a short timer.
+  const ttl = payload.type === 'auto' ? 15000 : (payload.type === 'manual' ? 2500 : 3500);
   toastHideTimer = setTimeout(hideToast, ttl);
 }
 
 function hideToast() {
   clearTimeout(toastHideTimer);
+  currentToastType = null;
   if (toastWin && !toastWin.isDestroyed()) toastWin.hide();
+  updateToastProtectedRect();
 }
 
 // ---------------------------------------------------------------------------
@@ -369,6 +441,11 @@ function onAutoCorrected(info) {
   settings.increment('totalCorrectedWords', info.wordCount);
   settings.increment('totalAutoCorrectedWords', info.wordCount);
   broadcast('stats:changed', getStats());
+
+  // Feedback mode (item 7): toast (default) → sound-only → fully silent.
+  //   showAutoToast !== false            → show the toast
+  //   else if autoSound                  → just a short beep, no toast
+  //   else                               → nothing at all
   if (settings.get('showAutoToast') !== false) {
     // Deliberately NOT sending info.original/info.converted here: unlike the
     // manual-shortcut toast (an explicit, user-initiated action on text the
@@ -381,6 +458,8 @@ function onAutoCorrected(info) {
       type: 'auto',
       targetLang: info.targetLang
     });
+  } else if (settings.get('autoSound')) {
+    try { native.beep(); } catch (e) {}
   }
 }
 
@@ -415,7 +494,7 @@ ipcMain.handle('settings:get-all', () => ({
   platformSupported: native.isSupported
 }));
 ipcMain.on('settings:set', (e, key, value) => {
-  const ALLOWED = ['autocorrectEnabled', 'showAutoToast', 'showManualToast', 'primaryLang', 'manualShortcut', 'launchAtLogin'];
+  const ALLOWED = ['autocorrectEnabled', 'showAutoToast', 'autoSound', 'showManualToast', 'primaryLang', 'manualShortcut', 'launchAtLogin'];
   if (ALLOWED.includes(key)) settings.set(key, value);
 });
 ipcMain.handle('convert:text', (e, text) => convertFullText(text || ''));
@@ -436,6 +515,10 @@ ipcMain.on('toast:action', (e, action) => {
 });
 ipcMain.on('open-external', (e, url) => {
   if (typeof url === 'string' && /^https:\/\//.test(url)) shell.openExternal(url);
+});
+ipcMain.on('welcome:done', () => {
+  settings.set('welcomeShown', true);
+  if (welcomeWin && !welcomeWin.isDestroyed()) welcomeWin.close();
 });
 ipcMain.on('toast:resize', (e, height) => {
   if (toastWin && !toastWin.isDestroyed()) {

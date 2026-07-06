@@ -212,6 +212,22 @@ test('engine: correct words build confidence that blocks a following fix', () =>
   assert.strictEqual(native.calls.typed, '');
 });
 
+test('engine: confidence is cleared on run reset so detection stays live after returning to a field', () => {
+  // Regression test for the "sometimes stops auto-correcting when I leave and
+  // come back to the same field" bug. Build up confidence, then reset the run
+  // (as happens on a mouse click / focus change / typing gap on the SAME
+  // window), and confirm the next mistake is still corrected.
+  const native = makeFakeNative({ layout: 'he' });
+  const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
+
+  typeWord(engine, 'שלום');   // confidence 1 in this window
+  engine.resetRun();          // left & returned to the same field / new burst
+  native.calls.typed = '';
+
+  typeWord(engine, 'יקךךם');  // 'hello' typed on the Hebrew layout → must correct
+  assert.strictEqual(native.calls.typed.trim(), 'Hello'); // single word → capitalized
+});
+
 test('engine: does not fire on a word the dictionaries do not know', () => {
   const native = makeFakeNative({ layout: 'en' });
   const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });

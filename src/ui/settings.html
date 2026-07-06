@@ -170,8 +170,12 @@
       <label class="switch"><input type="checkbox" id="autocorrectToggle" /><span class="slider"></span></label>
     </div>
     <div class="toggle-row">
-      <div>הצג הודעת תרגום אוטומטי<div class="sub">הצגת הודעה צפה לאחר תיקון אוטומטי</div></div>
-      <label class="switch"><input type="checkbox" id="showAutoToastToggle" /><span class="slider"></span></label>
+      <div>התראה על תיקון אוטומטי<div class="sub">מה יקרה כשמילה מתוקנת אוטומטית</div></div>
+      <select id="autoNotifySelect" class="lang-select">
+        <option value="toast">הודעה צפה</option>
+        <option value="sound">צליל בלבד</option>
+        <option value="silent">ללא התראה</option>
+      </select>
     </div>
     <div class="toggle-row">
       <div>הצג הודעה בלחיצה על קיצור<div class="sub">הצגת הודעה לאחר המרה ידנית</div></div>
