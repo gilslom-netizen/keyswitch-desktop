@@ -6,7 +6,7 @@
 // =============================================================================
 'use strict';
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, globalShortcut, clipboard, screen, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, globalShortcut, clipboard, screen, shell, session } = require('electron');
 const path = require('path');
 
 const native = require('./native/win');
@@ -36,6 +36,8 @@ if (!gotLock) {
 }
 
 function init() {
+  applySecurityHardening();
+
   settings = new SettingsStore(app.getPath('userData'));
 
   engine = new AutocorrectEngine({ native, settings });
@@ -67,6 +69,30 @@ function init() {
 }
 
 // ---------------------------------------------------------------------------
+// SECURITY HARDENING — defense-in-depth beyond contextIsolation/nodeIntegration.
+// None of this changes normal behavior: every window here only ever loads our
+// own local file:// HTML and never navigates anywhere, requests a permission,
+// or needs a new window — so these handlers only ever fire on something that
+// was never supposed to happen in the first place (a bug, or a compromised
+// renderer trying to escalate). Applied once, globally, to every webContents
+// this app ever creates (current windows and any future one), per Electron's
+// own security checklist, rather than repeated per-BrowserWindow.
+// ---------------------------------------------------------------------------
+function applySecurityHardening() {
+  // Deny every permission request (camera/mic/notifications/geolocation/...) —
+  // this app has no legitimate use for any of them.
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => callback(false));
+
+  app.on('web-contents-created', (event, contents) => {
+    // Block navigation away from our own local pages entirely.
+    contents.on('will-navigate', (e) => e.preventDefault());
+    // Block creation of any new window/tab (e.g. via window.open or a stray
+    // target="_blank" link) instead of letting Chromium open it.
+    contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Windows
 // ---------------------------------------------------------------------------
 function showSettingsWindow() {
@@ -88,7 +114,10 @@ function showSettingsWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'ui', 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      devTools: !app.isPackaged
     }
   });
   settingsWin.removeMenu();
@@ -112,7 +141,10 @@ function createToastWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'ui', 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      devTools: !app.isPackaged
     }
   });
   toastWin.setAlwaysOnTop(true, 'screen-saver');
