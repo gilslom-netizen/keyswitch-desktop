@@ -21,9 +21,21 @@
 'use strict';
 
 const { EventEmitter } = require('events');
+const crypto = require('crypto');
 const { convertFullText } = require('./shared_logic');
 const dict = require('./dictionaries');
 const keymap = require('./keymap');
+
+// Rejected words are tracked so the engine stops re-suggesting the same
+// false-positive, but the word itself may be sensitive (it's arbitrary text
+// the user typed — potentially part of a password mistyped in the wrong
+// layout). It must never sit in %APPDATA%\KeySwitch\settings.json as
+// recoverable plaintext, so only a one-way hash of it is ever persisted —
+// this is an internal tracking key, not a secret we need to decrypt later,
+// so a hash (not encryption/safeStorage) is the right tool here.
+function hashWord(word) {
+  return crypto.createHash('sha256').update(word.toLowerCase()).digest('hex');
+}
 
 const FRESH_GAP = 15000;
 const REJECT_COOLDOWN_MS = 30 * 1000;
@@ -320,7 +332,7 @@ class AutocorrectEngine extends EventEmitter {
 
   // "החזר טקסט מקורי ועצור" — restore the exact original keystrokes, put
   // CapsLock and the layout back the way they were, and register the rejection
-  // (cooldown + per-word suppression, like the extension).
+  // (cooldown + per-word suppression, keyed by hash — see hashWord above).
   revertLastFix() {
     const fix = this.lastFix;
     if (!fix) return false;
@@ -344,7 +356,8 @@ class AutocorrectEngine extends EventEmitter {
   }
 
   // ---------------------------------------------------------------------------
-  // REJECTION BOOKKEEPING (ported: cooldown, hard-off, per-word suppression)
+  // REJECTION BOOKKEEPING (cooldown, hard-off, per-word suppression keyed by
+  // a one-way hash — never the literal word; see hashWord above)
   // ---------------------------------------------------------------------------
   _registerRejection(word) {
     if (!word) return;
@@ -354,7 +367,7 @@ class AutocorrectEngine extends EventEmitter {
     if (this.sessionRejections >= 3) {
       this.hardOff = { windowId: this.windowId, until: now + HARD_OFF_MS };
     }
-    const key = word.toLowerCase();
+    const key = hashWord(word);
     const st = this.wordState[key] || { count: 0, last: 0 };
     st.count += 1;
     st.last = now;
@@ -363,7 +376,7 @@ class AutocorrectEngine extends EventEmitter {
   }
 
   _isSuppressed(word) {
-    const st = this.wordState[word.toLowerCase()];
+    const st = this.wordState[hashWord(word)];
     if (!st) return false;
     if (st.count >= 3) return true;
     return (Date.now() - st.last < WORD_SUPPRESS_MS);
