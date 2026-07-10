@@ -14,6 +14,18 @@ revertBtn.addEventListener('click', () => ks.toastAction('revert'));
 document.getElementById('disableAuto').addEventListener('click', () => ks.toastAction('disable-auto'));
 document.getElementById('hideAutoToast').addEventListener('click', () => ks.toastAction('hide-auto-toast'));
 
+// "Sound only" mode: main sends the notification sound as a data: URI. Reuse a
+// single Audio element and restart it each time so rapid corrections re-trigger.
+let notifyAudio = null;
+ks.onPlaySound((dataUri) => {
+  try {
+    if (!notifyAudio) notifyAudio = new Audio(dataUri);
+    else notifyAudio.src = dataUri;
+    notifyAudio.currentTime = 0;
+    notifyAudio.play().catch(() => {});
+  } catch (e) {}
+});
+
 function trim(s, n) {
   const clean = (s || '').replace(/[\n\r]+/g, ' ').trim();
   return clean.length > n ? clean.slice(0, n - 3) + '...' : clean;

@@ -34,6 +34,64 @@
 !include nsDialogs.nsh
 !include LogicLib.nsh
 
+; ---------------------------------------------------------------------------
+; Silently close a running KeySwitch before installing/updating.
+; ---------------------------------------------------------------------------
+; KeySwitch is a background tray app, so during a manual re-install/upgrade the
+; default electron-builder check pops up "KeySwitch is running — click OK to
+; close it. If it doesn't close, try closing it manually." and PAUSES the
+; installer (which is why the green progress bar appears frozen partway). That
+; prompt is pointless for a background app the installer can close itself.
+;
+; Defining customCheckAppRunning replaces electron-builder's default
+; _CHECK_APP_RUNNING. This is the same termination it does — graceful taskkill,
+; then a forced one, with retries — just WITHOUT the upfront confirmation
+; dialog, so the install proceeds without stalling and the progress bar keeps
+; moving to completion. The only prompt kept is the genuine last resort: a
+; process that refuses to die (e.g. running elevated), where manual action is
+; truly required. Defined outside the BUILD_UNINSTALLER guard so both the
+; installer and the uninstaller get the same quiet behavior.
+!macro customCheckAppRunning
+  !insertmacro FIND_PROCESS "${APP_EXECUTABLE_FILENAME}" $R0
+  ${if} $R0 == 0
+    DetailPrint `Closing running "${PRODUCT_NAME}"...`
+    !ifdef INSTALL_MODE_PER_ALL_USERS
+      nsExec::Exec `taskkill /im "${APP_EXECUTABLE_FILENAME}"`
+    !else
+      nsExec::Exec `"$SYSDIR\cmd.exe" /c taskkill /im "${APP_EXECUTABLE_FILENAME}" /fi "USERNAME eq %USERNAME%"`
+    !endif
+    Sleep 300
+    StrCpy $R1 0
+    ks_kill_loop:
+      IntOp $R1 $R1 + 1
+      !insertmacro FIND_PROCESS "${APP_EXECUTABLE_FILENAME}" $R0
+      ${if} $R0 == 0
+        Sleep 1000
+        !ifdef INSTALL_MODE_PER_ALL_USERS
+          nsExec::Exec `taskkill /f /im "${APP_EXECUTABLE_FILENAME}"`
+        !else
+          nsExec::Exec `"$SYSDIR\cmd.exe" /c taskkill /f /im "${APP_EXECUTABLE_FILENAME}" /fi "USERNAME eq %USERNAME%"`
+        !endif
+        !insertmacro FIND_PROCESS "${APP_EXECUTABLE_FILENAME}" $R0
+        ${if} $R0 == 0
+          DetailPrint `Waiting for "${PRODUCT_NAME}" to close.`
+          Sleep 2000
+        ${else}
+          Goto ks_not_running
+        ${endif}
+      ${else}
+        Goto ks_not_running
+      ${endif}
+      ${if} $R1 > 2
+        MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(appCannotBeClosed)" /SD IDCANCEL IDRETRY ks_kill_loop
+        Quit
+      ${else}
+        Goto ks_kill_loop
+      ${endif}
+    ks_not_running:
+  ${endif}
+!macroend
+
 ; electron-builder compiles this whole template TWICE: once with
 ; BUILD_UNINSTALLER defined (to produce the embedded uninstaller stub) and
 ; once without (the real installer). Our settings page, KSCFG parsing and

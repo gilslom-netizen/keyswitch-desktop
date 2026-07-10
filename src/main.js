@@ -8,6 +8,23 @@
 
 const { app, BrowserWindow, Tray, Menu, ipcMain, globalShortcut, clipboard, screen, shell, session } = require('electron');
 const path = require('path');
+const fs = require('fs');
+
+// Allow the (possibly hidden) toast window to play the notification sound in
+// "sound only" mode without a user gesture.
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
+// The auto-correction notification sound, read once and handed to the toast
+// renderer as a data: URI (avoids file:// CSP 'self' matching quirks).
+let notifySoundDataUri = null;
+function loadNotifySound() {
+  try {
+    const buf = fs.readFileSync(path.join(__dirname, '..', 'assets', 'notify.mp3'));
+    notifySoundDataUri = 'data:audio/mpeg;base64,' + buf.toString('base64');
+  } catch (e) {
+    notifySoundDataUri = null;
+  }
+}
 
 const native = require('./native/win');
 const { SettingsStore } = require('./settings-store');
@@ -39,6 +56,7 @@ if (!gotLock) {
 
 function init() {
   applySecurityHardening();
+  loadNotifySound();
 
   settings = new SettingsStore(app.getPath('userData'));
 
@@ -218,7 +236,17 @@ function positionToast() {
 function updateToastProtectedRect() {
   if (!engine) return;
   if (toastWin && !toastWin.isDestroyed() && toastWin.isVisible()) {
-    engine.protectedRect = toastWin.getBounds();
+    // The global mouse hook reports PHYSICAL screen pixels, while getBounds()
+    // is in DIP. On a scaled display (e.g. 150%) they differ, so convert the
+    // window bounds to physical coords before handing them to the engine —
+    // otherwise clicking the revert button on a scaled monitor wouldn't be
+    // recognized as "inside the toast" and would cancel the pending fix.
+    const dip = toastWin.getBounds();
+    try {
+      engine.protectedRect = screen.dipToScreenRect(toastWin, dip);
+    } catch (e) {
+      engine.protectedRect = dip;
+    }
   } else {
     engine.protectedRect = null;
   }
@@ -459,7 +487,22 @@ function onAutoCorrected(info) {
       targetLang: info.targetLang
     });
   } else if (settings.get('autoSound')) {
-    try { native.beep(); } catch (e) {}
+    playNotifySound();
+  }
+}
+
+// Play the notification sound in "sound only" mode. Uses the toast renderer
+// (which is always loaded, even while hidden) so we get the pleasant custom
+// sound; falls back to the system beep if the sound or the window is missing.
+function playNotifySound() {
+  try {
+    if (notifySoundDataUri && toastWin && !toastWin.isDestroyed()) {
+      toastWin.webContents.send('sound:play', notifySoundDataUri);
+    } else {
+      native.beep();
+    }
+  } catch (e) {
+    try { native.beep(); } catch (e2) {}
   }
 }
 

@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('keyswitch', {
   onToastShow: (cb) => ipcRenderer.on('toast:show', (e, data) => cb(data)),
   toastAction: (action) => ipcRenderer.send('toast:action', action),
   toastResize: (height) => ipcRenderer.send('toast:resize', height),
+  onPlaySound: (cb) => ipcRenderer.on('sound:play', (e, dataUri) => cb(dataUri)),
   openExternal: (url) => ipcRenderer.send('open-external', url),
   closeWelcome: () => ipcRenderer.send('welcome:done')
 });

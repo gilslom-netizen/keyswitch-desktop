@@ -171,6 +171,16 @@ class AutocorrectEngine extends EventEmitter {
     if (id !== this.windowId) {
       this.windowId = id;
       this.resetRun();
+      // A different window is a fresh context: clear the anti-nag state left
+      // over from rejections in the previous app/field, so detection is
+      // immediately live here. Without this, on a long-running tray session
+      // these counters accumulate forever and the engine grows over-quiet.
+      // (These are intentionally NOT cleared in resetRun(), which also fires on
+      // mere clicks — that would defeat the cooldown right after a revert in
+      // the same field.)
+      this.cooldownUntil = 0;
+      this.sessionRejections = 0;
+      this.hardOff = null;
       return true;
     }
     return false;
