@@ -38,6 +38,7 @@ function makeStub() {
     replaceText: () => {},
     sendCtrlCombo: () => {},
     beep: () => {},
+    playWav: () => false,
     VK
   };
 }
@@ -45,6 +46,7 @@ function makeStub() {
 function makeWin() {
   const koffi = require('koffi');
   const user32 = koffi.load('user32.dll');
+  const winmm = koffi.load('winmm.dll');
 
   const KEYBDINPUT = koffi.struct('KS_KEYBDINPUT', {
     wVk: 'uint16', wScan: 'uint16', dwFlags: 'uint32',
@@ -65,6 +67,13 @@ function makeWin() {
   const PostMessageW = user32.func('bool __stdcall PostMessageW(void*, uint32, uint64, void*)');
   const SendInput = user32.func('uint32 __stdcall SendInput(uint32, KS_INPUT*, int32)');
   const MessageBeep = user32.func('bool __stdcall MessageBeep(uint32)');
+  const PlaySoundW = winmm.func('bool __stdcall PlaySoundW(void*, void*, uint32)');
+
+  const SND = { ASYNC: 0x0001, NODEFAULT: 0x0002, MEMORY: 0x0004 };
+  // The WAV buffer currently handed to PlaySoundW. SND_ASYNC means winmm keeps
+  // reading the memory image after the call returns, so the buffer must stay
+  // referenced or the GC could free it mid-playback.
+  let playingWav = null;
 
   const INPUT_KEYBOARD = 1;
   const INPUT_SIZE = koffi.sizeof(INPUT);
@@ -198,6 +207,20 @@ function makeWin() {
     // 0xFFFFFFFF = a simple standard beep (no bundled sound asset needed).
     beep() {
       try { MessageBeep(0xFFFFFFFF); } catch (e) {}
+    },
+
+    // Plays an in-memory WAV via winmm — straight from the main process, with
+    // no IPC hop to a renderer and no MP3 decode, so the notification sound
+    // starts within a few milliseconds of the correction instead of after the
+    // renderer's Audio pipeline spins up. Returns false if playback could not
+    // start (caller falls back to the renderer path / MessageBeep).
+    playWav(wavBuffer) {
+      try {
+        playingWav = wavBuffer;
+        return !!PlaySoundW(wavBuffer, null, SND.MEMORY | SND.ASYNC | SND.NODEFAULT);
+      } catch (e) {
+        return false;
+      }
     }
   };
 }

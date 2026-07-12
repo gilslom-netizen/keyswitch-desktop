@@ -14,9 +14,12 @@ const fs = require('fs');
 // "sound only" mode without a user gesture.
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
-// The auto-correction notification sound, read once and handed to the toast
-// renderer as a data: URI (avoids file:// CSP 'self' matching quirks).
+// The auto-correction notification sound. Preferred path: notify.wav played
+// natively via winmm from the main process (lowest latency — no IPC hop, no
+// MP3 decode). Fallback path: notify.mp3 handed to the toast renderer as a
+// data: URI (avoids file:// CSP 'self' matching quirks).
 let notifySoundDataUri = null;
+let notifyWavBuffer = null;
 function loadNotifySound() {
   try {
     const buf = fs.readFileSync(path.join(__dirname, '..', 'assets', 'notify.mp3'));
@@ -24,6 +27,25 @@ function loadNotifySound() {
   } catch (e) {
     notifySoundDataUri = null;
   }
+  try {
+    notifyWavBuffer = fs.readFileSync(path.join(__dirname, '..', 'assets', 'notify.wav'));
+  } catch (e) {
+    notifyWavBuffer = null;
+  }
+}
+
+// Warm up winmm's playback path once at startup with a few milliseconds of
+// silence, so the FIRST real notification doesn't pay the one-time cost of
+// initializing the audio session.
+function prewarmNotifySound() {
+  if (!notifyWavBuffer || !native.playWav) return;
+  const rate = 24000, samples = 96; // 4ms of silence
+  const wav = Buffer.alloc(44 + samples * 2);
+  wav.write('RIFF', 0); wav.writeUInt32LE(36 + samples * 2, 4); wav.write('WAVE', 8);
+  wav.write('fmt ', 12); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(rate, 24); wav.writeUInt32LE(rate * 2, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34);
+  wav.write('data', 36); wav.writeUInt32LE(samples * 2, 40);
+  try { native.playWav(wav); } catch (e) {}
 }
 
 const native = require('./native/win');
@@ -57,6 +79,7 @@ if (!gotLock) {
 function init() {
   applySecurityHardening();
   loadNotifySound();
+  prewarmNotifySound();
 
   settings = new SettingsStore(app.getPath('userData'));
 
@@ -491,11 +514,12 @@ function onAutoCorrected(info) {
   }
 }
 
-// Play the notification sound in "sound only" mode. Uses the toast renderer
-// (which is always loaded, even while hidden) so we get the pleasant custom
-// sound; falls back to the system beep if the sound or the window is missing.
+// Play the notification sound in "sound only" mode. Fastest path first:
+// the WAV played natively from this process (starts within milliseconds).
+// Fallbacks: the toast renderer's Audio pipeline, then the system beep.
 function playNotifySound() {
   try {
+    if (notifyWavBuffer && native.playWav && native.playWav(notifyWavBuffer)) return;
     if (notifySoundDataUri && toastWin && !toastWin.isDestroyed()) {
       toastWin.webContents.send('sound:play', notifySoundDataUri);
     } else {
