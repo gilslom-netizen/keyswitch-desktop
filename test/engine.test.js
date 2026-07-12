@@ -108,7 +108,11 @@ function makeFakeNative({ layout = 'en', caps = false } = {}) {
     toggleCapsLock: () => { calls.capsToggles++; caps = !caps; },
     sendUnicodeText: (t) => { calls.typed += t; },
     sendBackspaces: (n) => { calls.backspaces += n; },
+    // Atomic erase+retype (production path); feeds the same counters the
+    // assertions check.
+    replaceText: (n, t) => { calls.backspaces += n; calls.typed += t; },
     sendCtrlCombo: () => {},
+    beep: () => {},
     VK: {}
   };
 }
@@ -233,4 +237,26 @@ test('engine: does not fire on a word the dictionaries do not know', () => {
   const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
   typeWord(engine, 'xkcd');
   assert.strictEqual(native.calls.typed, '');
+});
+
+test('engine: inject-guard swallows injection echoes but keeps real keystrokes', () => {
+  const keymap = require('../src/engine/keymap');
+  const native = makeFakeNative({ layout: 'en' });
+  const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
+  engine._syncWindow();
+  engine.lastKeyTime = Date.now();
+  engine._armInjectGuard();
+
+  const kd = (keycode) => engine._onKeydown({ keycode, shiftKey: false, ctrlKey: false, altKey: false, metaKey: false });
+
+  // Echoes of our own SendInput batch (Backspace, and 0 = VK_PACKET/unicode)
+  // must be ignored so they don't corrupt the buffer.
+  kd(keymap.UiohookKey.Backspace);
+  kd(0);
+  assert.strictEqual(engine.buffer, '', 'injection echoes must not enter the buffer');
+
+  // A REAL letter typed during the same guard window must still register —
+  // this is the "typing during a correction gets swallowed" bug being fixed.
+  kd(keymap.UiohookKey.A);
+  assert.strictEqual(engine.buffer, 'a', 'a genuine keystroke during the guard must be kept');
 });

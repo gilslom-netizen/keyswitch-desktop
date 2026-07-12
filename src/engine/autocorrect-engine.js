@@ -80,6 +80,7 @@ class AutocorrectEngine extends EventEmitter {
     this.windowId = null;
     this.lastKeyTime = 0;
     this.ignoreUntil = 0;
+    this._injectGuard = null;
 
     this.wordState = settings.get('acWordState') || {};
     this.cooldownUntil = 0;
@@ -188,7 +189,19 @@ class AutocorrectEngine extends EventEmitter {
 
   _onKeydown(e) {
     const now = Date.now();
-    if (now < this.ignoreUntil) return;
+    // Consume the hook echoes of OUR OWN injected replacement first. The old
+    // approach ("ignore everything for 600ms") also swallowed REAL keystrokes
+    // typed right after a correction, silently desyncing the buffer from the
+    // screen. Now only keycodes that can belong to the injected batch are
+    // skipped (Backspace, the injected chars' codes, and 0 = how the hook
+    // reports KEYEVENTF_UNICODE/VK_PACKET events); anything else during the
+    // window is a genuine keystroke — and because the replacement is a single
+    // atomic SendInput batch, that keystroke landed AFTER the corrected text
+    // on screen, so processing it normally keeps the buffer model correct.
+    if (this._injectGuard) {
+      if (now > this._injectGuard.until) this._injectGuard = null;
+      else if (this._injectGuard.codes.has(e.keycode)) return;
+    }
     if (!this.enabled) return;
     if (keymap.MODIFIER_KEYS.has(e.keycode)) return;
 
@@ -219,11 +232,17 @@ class AutocorrectEngine extends EventEmitter {
     if (boundary != null) {
       // Enter/Tab often submit a message or move focus — the text may be gone
       // by the time we could fix it, so they only close the run. Space is the
-      // safe trigger; evaluation happens on its keyup (see _onKeyup), once the
-      // space character has definitely reached the target app.
+      // safe trigger. Evaluation happens right here at space-KEYDOWN: by the
+      // time this async hook callback runs in JS, the OS long since delivered
+      // the physical space to the focused app, and our injected replacement is
+      // queued after any already-pending input anyway. Evaluating at keyup
+      // (the previous design) opened a ~50-100ms window in which a fast
+      // typist's next letter entered the buffer BEFORE evaluation — the word
+      // extractor then saw that letter as the "last word" and the real mistake
+      // was silently skipped (missed corrections during fast typing).
       if (boundary === ' ') {
         this._appendChar(' ');
-        this._pendingEvaluate = true;
+        try { this.evaluate(); } catch (err) { console.error('[KeySwitch] evaluate failed:', err); }
       } else {
         this.resetRun();
       }
@@ -246,12 +265,9 @@ class AutocorrectEngine extends EventEmitter {
     }
   }
 
-  _onKeyup(e) {
-    if (Date.now() < this.ignoreUntil) return;
-    if (!this._pendingEvaluate || e.keycode !== keymap.UiohookKey.Space) return;
-    this._pendingEvaluate = false;
-    try { this.evaluate(); } catch (err) { console.error('[KeySwitch] evaluate failed:', err); }
-  }
+  // Evaluation moved to space-KEYDOWN (see _onKeydown); the keyup listener is
+  // kept only so uiohook keeps a consistent handler set — nothing to do here.
+  _onKeyup() {}
 
   // ---------------------------------------------------------------------------
   // DETECTION
@@ -313,17 +329,31 @@ class AutocorrectEngine extends EventEmitter {
   // CapsLock off first if it was the culprit, keyboard layout switched only if
   // it still doesn't match the language the user actually meant.
   // ---------------------------------------------------------------------------
+  // Arm the guard covering the hook echoes of a SendInput batch we're about to
+  // emit. Keydown events whose keycode could be part of that batch (Backspace,
+  // and 0 = how libuiohook reports KEYEVENTF_UNICODE/VK_PACKET characters) are
+  // ignored for a short window; any OTHER key is a genuine keystroke and is
+  // still processed normally — so typing during a correction no longer gets
+  // silently swallowed (which used to desync the buffer from the screen).
+  _armInjectGuard() {
+    const until = Date.now() + INJECT_GUARD_MS;
+    this.ignoreUntil = until; // also blocks the (irrelevant) mouse path
+    this._injectGuard = { until, codes: new Set([keymap.UiohookKey.Backspace, 0]) };
+  }
+
   _applyFix(fix) {
     const { runStart, runOriginal, runCore, runTrail, runConverted, decision, word, capsOn } = fix;
     const targetLang = decision.direction === 'en2he' ? 'he' : 'en';
     const prevLayout = this.native.getForegroundLayout();
 
-    this.ignoreUntil = Date.now() + INJECT_GUARD_MS;
+    this._armInjectGuard();
 
-    // 1. Replace the text (Unicode injection is layout-independent, so the
-    //    order relative to the layout switch doesn't matter for correctness).
-    this.native.sendBackspaces(runOriginal.length);
-    this.native.sendUnicodeText(runConverted + runTrail);
+    // 1. Replace the wrong run in ONE atomic SendInput batch (erase + retype).
+    //    A single batch can't be interleaved with real user input, so a key
+    //    the user presses mid-correction lands cleanly after the whole
+    //    replacement instead of in the middle of it. Unicode injection is
+    //    layout-independent, so ordering vs. the layout switch is irrelevant.
+    this.native.replaceText(runOriginal.length, runConverted + runTrail);
 
     // 2. CapsLock-first policy (per spec): a caps slip is fixed by turning
     //    CapsLock off, and only then do we check whether the layout is wrong.
@@ -372,10 +402,11 @@ class AutocorrectEngine extends EventEmitter {
     if (!fix) return false;
     if (fix.windowId !== this.native.getForegroundWindowId()) { this._endFixTracking(); return false; }
 
-    this.ignoreUntil = Date.now() + INJECT_GUARD_MS;
+    this._armInjectGuard();
     const eraseLen = fix.converted.length + fix.typedAfter.length;
-    this.native.sendBackspaces(eraseLen);
-    this.native.sendUnicodeText(fix.original + fix.typedAfter);
+    // Same atomic erase+retype as _applyFix, so a keystroke during the revert
+    // can't land in the middle of it.
+    this.native.replaceText(eraseLen, fix.original + fix.typedAfter);
 
     if (fix.capsFixed) this.native.toggleCapsLock();
     if (fix.layoutSwitched && (fix.prevLayout === 'he' || fix.prevLayout === 'en')) {

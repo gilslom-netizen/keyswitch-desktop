@@ -35,6 +35,7 @@ function makeStub() {
     toggleCapsLock: () => {},
     sendUnicodeText: () => {},
     sendBackspaces: () => {},
+    replaceText: () => {},
     sendCtrlCombo: () => {},
     beep: () => {},
     VK
@@ -147,6 +148,35 @@ function makeWin() {
       const inputs = [];
       for (let i = 0; i < n; i++) {
         inputs.push(keyInput(VK.BACK, 0, 0), keyInput(VK.BACK, 0, KEYEVENTF.KEYUP));
+      }
+      send(inputs);
+    },
+
+    // Erase-and-retype in ONE SendInput call. Win32 guarantees that events
+    // inside a single SendInput batch are NOT interspersed with real user
+    // input — so a keystroke the user types at the exact moment of an
+    // auto-correction can only land BEFORE or AFTER the whole replacement,
+    // never in the middle of it (which used to be possible when the erase and
+    // the retype were two separate calls, and could corrupt the text on
+    // screen for fast typists).
+    replaceText(backspaceCount, text) {
+      const inputs = [];
+      for (let i = 0; i < backspaceCount; i++) {
+        inputs.push(keyInput(VK.BACK, 0, 0), keyInput(VK.BACK, 0, KEYEVENTF.KEYUP));
+      }
+      for (const ch of text) {
+        if (ch === '\n') {
+          inputs.push(keyInput(VK.RETURN, 0, 0), keyInput(VK.RETURN, 0, KEYEVENTF.KEYUP));
+          continue;
+        }
+        const code = ch.charCodeAt(0);
+        inputs.push(keyInput(0, code, KEYEVENTF.UNICODE));
+        inputs.push(keyInput(0, code, KEYEVENTF.UNICODE | KEYEVENTF.KEYUP));
+        if (ch.length > 1) { // surrogate pair second unit
+          const lo = ch.charCodeAt(1);
+          inputs.push(keyInput(0, lo, KEYEVENTF.UNICODE));
+          inputs.push(keyInput(0, lo, KEYEVENTF.UNICODE | KEYEVENTF.KEYUP));
+        }
       }
       send(inputs);
     },
