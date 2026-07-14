@@ -122,7 +122,9 @@ Function KsParseCfg
   StrCpy $KsHasToken "0"
   ; defaults (match the app's built-in settings defaults)
   StrCpy $KsValAC "1"
-  StrCpy $KsValAT "1"
+  StrCpy $KsValAT "0" ; auto-toast OFF by default — the notification SOUND is
+                      ; the default feedback (the app's autoSound default is
+                      ; true and kicks in whenever the toast is off)
   StrCpy $KsValMT "0" ; manual-shortcut toast OFF by default (deliberate action)
   StrCpy $KsValAS "1"
   StrCpy $KsValLang "h"
@@ -218,7 +220,7 @@ Function KsSettingsPageCreate
     ${NSD_Check} $KsChkAC
   ${EndIf}
 
-  ${NSD_CreateCheckbox} 10u 28u 280u 12u "הצג הודעה צפה לאחר תיקון אוטומטי"
+  ${NSD_CreateCheckbox} 10u 28u 280u 12u "הצג הודעה צפה לאחר תיקון אוטומטי (כבוי: צליל עדין במקום)"
   Pop $KsChkAT
   ${If} $KsValAT == "1"
     ${NSD_Check} $KsChkAT

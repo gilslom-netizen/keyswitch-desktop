@@ -35,8 +35,12 @@ const fs = require('fs');
 const path = require('path');
 const dict = require('../src/engine/dictionaries');
 
-const DESKTOP_TARGET = 5500; // per language (user floor: 5000, keep a margin)
-const EXT_TARGET = 4000;     // extension subset (desktop keeps the advantage)
+const DESKTOP_TARGET = 15500; // per language (5,500 + 10,000; floor asserted below)
+const EXT_TARGET = 12000;     // extension subset (desktop keeps the advantage)
+// Words rarer than this in the corpus are too far down the tail to trust —
+// that's where subtitle-corpus junk (typos, one-off names) lives, and adding
+// junk means gibberish could get "corrected" into it.
+const MIN_CORPUS_COUNT = 15;
 
 const HE_ONLY = /^[א-ת]+$/;
 const EN_ONLY = /^[a-z]+$/;
@@ -60,8 +64,11 @@ function parseArgs() {
 function loadCorpus(file) {
   return fs.readFileSync(file, 'utf8')
     .split('\n')
-    .map((l) => l.trim().split(/\s+/)[0])
-    .filter(Boolean);
+    .map((l) => {
+      const [word, count] = l.trim().split(/\s+/);
+      return { word, count: Number(count) || 0 };
+    })
+    .filter((e) => e.word);
 }
 
 function main() {
@@ -70,15 +77,21 @@ function main() {
   const heCorpus = loadCorpus(hePath);
 
   // Reference lexicons: every real word of each language we know about.
-  const EN_LEX = new Set(enCorpus.filter((w) => /^[a-z']+$/.test(w)));
+  // NOTE: the full 50k lists are used here regardless of MIN_CORPUS_COUNT —
+  // the frequency floor limits what we ADD, never what we check AGAINST.
+  const EN_LEX = new Set(enCorpus.map((e) => e.word).filter((w) => /^[a-z']+$/.test(w)));
   dict.BASE_EN.forEach((w) => EN_LEX.add(w.toLowerCase()));
   dict.EN_PRIMARY_ADD_EN.forEach((w) => EN_LEX.add(w));
-  const HE_LEX = new Set(heCorpus.filter((w) => HE_ONLY.test(w)));
+  const HE_LEX = new Set(heCorpus.map((e) => e.word).filter((w) => HE_ONLY.test(w)));
   dict.BASE_HE.forEach((w) => HE_LEX.add(w));
   dict.HE_PRIMARY_ADD_HE.forEach((w) => HE_LEX.add(w));
 
-  const knownEN = new Set(dict.FULL_EN.concat(dict.EN_PRIMARY_ADD_EN));
-  const knownHE = new Set(dict.FULL_HE.concat(dict.HE_PRIMARY_ADD_HE));
+  // Seed the "already have it" sets from the BASE lists only — NOT FULL_* —
+  // otherwise a re-run would see the previously generated extras as "known",
+  // skip them, and overwrite the file without its own top words. Generation
+  // must be idempotent: same corpora in, same lists out.
+  const knownEN = new Set(dict.BASE_EN.map((w) => w.toLowerCase()).concat(dict.EN_PRIMARY_ADD_EN));
+  const knownHE = new Set(dict.BASE_HE.concat(dict.HE_PRIMARY_ADD_HE));
 
   // English word W is safe iff no legitimate Hebrew typing flips into it.
   function safeEN(w) {
@@ -107,32 +120,38 @@ function main() {
 
   const extraEN = [];
   let scannedEN = 0;
-  for (const w of enCorpus) {
+  let minCountEN = Infinity;
+  for (const { word: w, count } of enCorpus) {
     if (extraEN.length >= DESKTOP_TARGET) break;
+    if (count < MIN_CORPUS_COUNT) break; // frequency-sorted: nothing usable below
     scannedEN++;
     if (!EN_ONLY.test(w) || w.length < 3) continue;
     if (knownEN.has(w)) continue;
     if (!safeEN(w)) continue;
     knownEN.add(w);
     extraEN.push(w);
+    minCountEN = Math.min(minCountEN, count);
   }
 
   const extraHE = [];
   let scannedHE = 0;
-  for (const w of heCorpus) {
+  let minCountHE = Infinity;
+  for (const { word: w, count } of heCorpus) {
     if (extraHE.length >= DESKTOP_TARGET) break;
+    if (count < MIN_CORPUS_COUNT) break;
     scannedHE++;
     if (!HE_ONLY.test(w) || w.length < 3) continue;
     if (knownHE.has(w)) continue;
     if (!safeHE(w)) continue;
     knownHE.add(w);
     extraHE.push(w);
+    minCountHE = Math.min(minCountHE, count);
   }
 
-  console.log(`EN: kept ${extraEN.length} of first ${scannedEN} corpus words`);
-  console.log(`HE: kept ${extraHE.length} of first ${scannedHE} corpus words`);
-  if (extraEN.length < 5000 || extraHE.length < 5000) {
-    console.error('FAILED: fewer than 5000 words survived filtering for a language');
+  console.log(`EN: kept ${extraEN.length} of first ${scannedEN} corpus words (rarest kept: ${minCountEN} occurrences)`);
+  console.log(`HE: kept ${extraHE.length} of first ${scannedHE} corpus words (rarest kept: ${minCountHE} occurrences)`);
+  if (extraEN.length < 15000 || extraHE.length < 15000) {
+    console.error('FAILED: fewer than 15000 words survived filtering for a language');
     process.exit(1);
   }
 

@@ -43,6 +43,13 @@ const WORD_SUPPRESS_MS = 30 * 60 * 1000;
 const HARD_OFF_MS = 5 * 60 * 1000;
 const FIX_TRACK_MS = 30 * 1000;
 const INJECT_GUARD_MS = 600;
+// If we are processing a key event more than this long after it physically
+// happened (event-loop lag: GC pause, busy main process), the user may have
+// typed MORE keys that are already on screen but not yet delivered to us —
+// injecting a correction now would erase the wrong characters. Detection is
+// skipped for that word instead (a missed correction is harmless; a corrupted
+// line is not).
+const MAX_EVENT_LAG_MS = 150;
 
 const isWordChar = (c) => c != null && /[A-Za-z֐-׿0-9']/.test(c);
 const isBoundaryChar = (c) => c != null && !isWordChar(c);
@@ -81,6 +88,10 @@ class AutocorrectEngine extends EventEmitter {
     this.lastKeyTime = 0;
     this.ignoreUntil = 0;
     this._injectGuard = null;
+    // Calibration for _eventLag(): minimum observed skew between our clock
+    // and the hook thread's event timestamps (which use an arbitrary base —
+    // milliseconds since boot on Windows).
+    this._timeSkew = null;
 
     this.wordState = settings.get('acWordState') || {};
     this.cooldownUntil = 0;
@@ -152,7 +163,38 @@ class AutocorrectEngine extends EventEmitter {
     this.emit('fix-tracking-ended');
   }
 
+  // How late are we processing this hook event, in ms? The hook thread stamps
+  // events with its own clock (arbitrary base), so the offset to Date.now()
+  // is unknown — but it is CONSTANT, and the smallest offset we ever observe
+  // is the zero-lag baseline. Anything above that baseline is genuine
+  // processing delay. Recalibrates itself if the clocks jump apart (system
+  // suspend/resume, tick-counter wrap).
+  _eventLag(e) {
+    if (!e || typeof e.time !== 'number' || !isFinite(e.time) || e.time <= 0) return 0;
+    const skew = Date.now() - e.time;
+    if (this._timeSkew === null || skew < this._timeSkew ||
+        Math.abs(skew - this._timeSkew) > 10 * 60 * 1000) {
+      this._timeSkew = skew;
+    }
+    return skew - this._timeSkew;
+  }
+
+  // A hook callback must never throw into uiohook's native dispatcher — an
+  // uncaught exception there can take down the whole hook (or the process).
+  // The real handlers live in _handleKeydown/_handleMousedown below.
+  _onKeydown(e) {
+    try { this._handleKeydown(e); } catch (err) {
+      console.error('[KeySwitch] keydown handler failed:', err);
+    }
+  }
+
   _onMousedown(e) {
+    try { this._handleMousedown(e); } catch (err) {
+      console.error('[KeySwitch] mouse handler failed:', err);
+    }
+  }
+
+  _handleMousedown(e) {
     if (Date.now() < this.ignoreUntil) return;
     // A click INSIDE our own toast window (e.g. the "החזר טקסט מקורי ועצור"
     // button) must not tear down the run — otherwise the global mouse hook
@@ -187,20 +229,30 @@ class AutocorrectEngine extends EventEmitter {
     return false;
   }
 
-  _onKeydown(e) {
+  _handleKeydown(e) {
     const now = Date.now();
+    const lag = this._eventLag(e);
     // Consume the hook echoes of OUR OWN injected replacement first. The old
     // approach ("ignore everything for 600ms") also swallowed REAL keystrokes
     // typed right after a correction, silently desyncing the buffer from the
-    // screen. Now only keycodes that can belong to the injected batch are
-    // skipped (Backspace, the injected chars' codes, and 0 = how the hook
-    // reports KEYEVENTF_UNICODE/VK_PACKET events); anything else during the
-    // window is a genuine keystroke — and because the replacement is a single
-    // atomic SendInput batch, that keystroke landed AFTER the corrected text
-    // on screen, so processing it normally keeps the buffer model correct.
+    // screen. Only events that can belong to the injected batch are skipped:
+    //  * keycode 0 — how the hook reports KEYEVENTF_UNICODE/VK_PACKET events;
+    //    physical keyboards never produce it, so a time window is enough.
+    //  * Backspace — but only as many as the batch actually contained. A
+    //    REAL Backspace pressed right after a correction (the natural "undo
+    //    that!" reflex) is processed normally once the echoes are consumed,
+    //    instead of being silently swallowed for the whole guard window.
+    // Anything else during the window is a genuine keystroke — and because
+    // the replacement is a single atomic SendInput batch, that keystroke
+    // landed AFTER the corrected text on screen, so processing it normally
+    // keeps the buffer model correct.
     if (this._injectGuard) {
-      if (now > this._injectGuard.until) this._injectGuard = null;
-      else if (this._injectGuard.codes.has(e.keycode)) return;
+      const g = this._injectGuard;
+      if (now > g.until) this._injectGuard = null;
+      else if (e.keycode === keymap.UiohookKey.Backspace) {
+        if (g.backspaces > 0) { g.backspaces--; return; }
+        // echoes exhausted — this Backspace is the user's, fall through
+      } else if (g.codes.has(e.keycode)) return;
     }
     if (!this.enabled) return;
     if (keymap.MODIFIER_KEYS.has(e.keycode)) return;
@@ -214,8 +266,14 @@ class AutocorrectEngine extends EventEmitter {
     if (e.ctrlKey || e.metaKey || e.altKey) { this.resetRun(); return; }
 
     if (e.keycode === keymap.UiohookKey.Escape) {
-      if (this.lastFix) this.revertLastFix();
-      else this.resetRun();
+      if (this.lastFix) {
+        // A stale Escape means more (undelivered) keys may already be on
+        // screen — reverting now would erase the wrong characters. Keep the
+        // fix tracked; pressing Escape again (a fresh event) will revert.
+        if (lag <= MAX_EVENT_LAG_MS) this.revertLastFix();
+      } else {
+        this.resetRun();
+      }
       return;
     }
     if (e.keycode === keymap.UiohookKey.Backspace) {
@@ -240,9 +298,18 @@ class AutocorrectEngine extends EventEmitter {
       // typist's next letter entered the buffer BEFORE evaluation — the word
       // extractor then saw that letter as the "last word" and the real mistake
       // was silently skipped (missed corrections during fast typing).
+      //
+      // The lag gate is the "kept typing during detection" protection: when
+      // this space is being processed late, keys typed after it may already
+      // be on screen but not yet delivered to us, and a correction computed
+      // from our (older) model would erase the wrong characters. Skip this
+      // word; the buffer itself stays in sync because the pending events are
+      // still delivered in order.
       if (boundary === ' ') {
         this._appendChar(' ');
-        try { this.evaluate(); } catch (err) { console.error('[KeySwitch] evaluate failed:', err); }
+        if (lag <= MAX_EVENT_LAG_MS) {
+          try { this.evaluate(); } catch (err) { console.error('[KeySwitch] evaluate failed:', err); }
+        }
       } else {
         this.resetRun();
       }
@@ -250,8 +317,12 @@ class AutocorrectEngine extends EventEmitter {
     }
 
     const layout = this.native.getForegroundLayout();
+    // A third layout (Arabic, Russian, ...) — we can't model what's on screen,
+    // and "correcting" text typed in it would corrupt it. Stay out of the way
+    // until the user is back on Hebrew/English.
+    if (layout !== 'he' && layout !== 'en') { this.buffer = ''; return; }
     const caps = this.native.isCapsLockOn();
-    const ch = keymap.keyToChar(e.keycode, layout === 'he' ? 'he' : 'en', !!e.shiftKey, caps);
+    const ch = keymap.keyToChar(e.keycode, layout, !!e.shiftKey, caps);
     if (ch == null) return;
     this._appendChar(ch);
   }
@@ -330,15 +401,26 @@ class AutocorrectEngine extends EventEmitter {
   // it still doesn't match the language the user actually meant.
   // ---------------------------------------------------------------------------
   // Arm the guard covering the hook echoes of a SendInput batch we're about to
-  // emit. Keydown events whose keycode could be part of that batch (Backspace,
-  // and 0 = how libuiohook reports KEYEVENTF_UNICODE/VK_PACKET characters) are
-  // ignored for a short window; any OTHER key is a genuine keystroke and is
-  // still processed normally — so typing during a correction no longer gets
-  // silently swallowed (which used to desync the buffer from the screen).
-  _armInjectGuard() {
+  // emit. keycode 0 (how libuiohook reports KEYEVENTF_UNICODE/VK_PACKET
+  // characters) is ignored for a short window — physical keyboards never
+  // produce it. Backspace echoes are counted exactly: only as many as the
+  // batch contains are swallowed, so a REAL Backspace pressed right after a
+  // correction is processed normally instead of desyncing the buffer.
+  // Any other key is a genuine keystroke and is processed normally — so
+  // typing during a correction no longer gets silently swallowed.
+  _armInjectGuard(backspaceCount) {
     const until = Date.now() + INJECT_GUARD_MS;
     this.ignoreUntil = until; // also blocks the (irrelevant) mouse path
-    this._injectGuard = { until, codes: new Set([keymap.UiohookKey.Backspace, 0]) };
+    this._injectGuard = {
+      until,
+      backspaces: (typeof backspaceCount === 'number') ? backspaceCount : Infinity,
+      codes: new Set([0])
+    };
+  }
+
+  _disarmInjectGuard() {
+    this._injectGuard = null;
+    this.ignoreUntil = 0;
   }
 
   _applyFix(fix) {
@@ -346,21 +428,29 @@ class AutocorrectEngine extends EventEmitter {
     const targetLang = decision.direction === 'en2he' ? 'he' : 'en';
     const prevLayout = this.native.getForegroundLayout();
 
-    this._armInjectGuard();
+    this._armInjectGuard(runOriginal.length);
 
     // 1. Replace the wrong run in ONE atomic SendInput batch (erase + retype).
     //    A single batch can't be interleaved with real user input, so a key
     //    the user presses mid-correction lands cleanly after the whole
     //    replacement instead of in the middle of it. Unicode injection is
     //    layout-independent, so ordering vs. the layout switch is irrelevant.
-    this.native.replaceText(runOriginal.length, runConverted + runTrail);
+    const injected = this.native.replaceText(runOriginal.length, runConverted + runTrail);
+    if (injected === false) {
+      // SendInput was blocked (elevated window, secure desktop, UIPI):
+      // NOTHING reached the screen, so record nothing, notify nothing, and
+      // drop the guard immediately so no real keystroke gets eaten as an
+      // "echo" of a batch that never happened.
+      this._disarmInjectGuard();
+      this.resetRun();
+      return;
+    }
 
     // 2. CapsLock-first policy (per spec): a caps slip is fixed by turning
     //    CapsLock off, and only then do we check whether the layout is wrong.
     let capsFixed = false;
     if (capsOn) {
-      this.native.toggleCapsLock();
-      capsFixed = true;
+      capsFixed = this.native.toggleCapsLock() !== false;
     }
     let layoutSwitched = false;
     if (prevLayout !== targetLang) {
@@ -402,11 +492,17 @@ class AutocorrectEngine extends EventEmitter {
     if (!fix) return false;
     if (fix.windowId !== this.native.getForegroundWindowId()) { this._endFixTracking(); return false; }
 
-    this._armInjectGuard();
     const eraseLen = fix.converted.length + fix.typedAfter.length;
+    this._armInjectGuard(eraseLen);
     // Same atomic erase+retype as _applyFix, so a keystroke during the revert
     // can't land in the middle of it.
-    this.native.replaceText(eraseLen, fix.original + fix.typedAfter);
+    const injected = this.native.replaceText(eraseLen, fix.original + fix.typedAfter);
+    if (injected === false) {
+      // Injection blocked — the corrected text is still on screen. Keep the
+      // fix tracked (a later Escape/click can retry) and swallow no echoes.
+      this._disarmInjectGuard();
+      return false;
+    }
 
     if (fix.capsFixed) this.native.toggleCapsLock();
     if (fix.layoutSwitched && (fix.prevLayout === 'he' || fix.prevLayout === 'en')) {

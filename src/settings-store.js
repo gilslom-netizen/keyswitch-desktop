@@ -16,15 +16,19 @@ const { EventEmitter } = require('events');
 
 const DEFAULTS = {
   autocorrectEnabled: true,
-  showAutoToast: true,
+  // Auto-correction feedback default is SOUND, not the toast: the notification
+  // sound now starts within milliseconds (native winmm playback), it is less
+  // intrusive than a popup while typing, and a correction can still be undone
+  // instantly with Escape. The toast remains available in settings.
+  // toast on -> toast shown (sound ignored); toast off + sound on -> sound
+  // only; toast off + sound off -> fully silent. Existing installations keep
+  // whatever they have persisted in settings.json — this only affects fresh
+  // installs.
+  showAutoToast: false,
   // Manual-shortcut toast is OFF by default: pressing the shortcut is an
   // explicit, deliberate action, so a confirmation popup every time is noise.
   showManualToast: false,
-  // Auto-correction feedback when showAutoToast is off: play a short system
-  // beep instead of showing the toast. Default off (the toast is the default
-  // feedback). toast on  -> toast shown (beep ignored);
-  // toast off + sound on -> beep only; toast off + sound off -> fully silent.
-  autoSound: false,
+  autoSound: true,
   primaryLang: 'he',
   manualShortcut: 'Alt+Shift+J',
   launchAtLogin: true,

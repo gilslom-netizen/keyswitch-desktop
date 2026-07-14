@@ -124,11 +124,14 @@ function makeWin() {
       return (GetKeyState(VK.CAPITAL) & 1) === 1;
     },
 
+    // Returns false when the events were blocked (e.g. UIPI: the focused
+    // window is elevated and we are not), so the engine doesn't record a
+    // CapsLock change that never happened.
     toggleCapsLock() {
-      send([
+      return send([
         keyInput(VK.CAPITAL, 0, 0),
         keyInput(VK.CAPITAL, 0, KEYEVENTF.KEYUP)
-      ]);
+      ]) === 2;
     },
 
     // Types text into the focused app using KEYEVENTF_UNICODE, which is
@@ -168,6 +171,11 @@ function makeWin() {
     // never in the middle of it (which used to be possible when the erase and
     // the retype were two separate calls, and could corrupt the text on
     // screen for fast typists).
+    //
+    // Returns true only when EVERY event was injected. SendInput is
+    // all-or-nothing when blocked by UIPI (elevated target window) — it
+    // returns 0 and nothing reaches the screen — so on false the engine
+    // knows the screen is untouched and records nothing.
     replaceText(backspaceCount, text) {
       const inputs = [];
       for (let i = 0; i < backspaceCount; i++) {
@@ -187,7 +195,7 @@ function makeWin() {
           inputs.push(keyInput(0, lo, KEYEVENTF.UNICODE | KEYEVENTF.KEYUP));
         }
       }
-      send(inputs);
+      return send(inputs) === inputs.length;
     },
 
     // Ctrl+<letter>, releasing Shift/Alt first so a physically-held hotkey
