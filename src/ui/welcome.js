@@ -12,6 +12,14 @@ document.querySelectorAll('.link-btn').forEach((btn) => {
   });
 });
 
+// Pin-to-taskbar button
+const pinBtn = document.getElementById('pinBtn');
+if (pinBtn) {
+  pinBtn.addEventListener('click', () => {
+    ks.pinToTaskbar();
+  });
+}
+
 document.getElementById('doneBtn').addEventListener('click', () => {
   ks.closeWelcome();
 });
