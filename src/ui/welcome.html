@@ -44,6 +44,14 @@
       background: #0f3460; color: #7eb8f7; border-radius: 4px; padding: 1px 6px;
       font-size: 11px; font-family: monospace; white-space: nowrap; direction: ltr; display: inline-block;
     }
+    .pin-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: #4a90e2; color: #fff; border: none; border-radius: 7px;
+      padding: 7px 14px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+      font-family: inherit; margin-top: 10px; transition: background 0.15s;
+    }
+    .pin-btn:hover { background: #357abd; }
+    .pin-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
     .try-title { font-size: 14.5px; font-weight: 700; color: #fff; margin: 18px 0 4px; }
     .try-sub { font-size: 12.5px; color: #b0c4de; line-height: 1.6; margin-bottom: 12px; }
     .try-sub code {
@@ -79,21 +87,25 @@
     </div>
 
     <div class="done-title">הכל מוכן, KeySwitch פועל ברקע! 🎉</div>
-    <div class="done-sub">שלושה דברים קטנים ששווה לדעת כדי להפיק מהתוכנה את המקסימום:</div>
+    <div class="done-sub">שלושה דברים קטנים ששווה לדעת כדי להפיק את המיטב מהתוכנה:</div>
 
     <div class="tip">
-      <div class="tip-title">1. תיקון אוטומטי בכל תוכנה ⚡</div>
-      <div class="tip-body">פשוט תקלידו כרגיל. אם מילה נכתבה בטעות בפריסת מקלדת שגויה — KeySwitch יתקן אותה ויחליף את שפת המקלדת אוטומטית, בכל תוכנה: Word, Excel, דפדפן, דוקס ועוד.</div>
+      <div class="tip-title">1. גישה מהירה מהמגש 📌</div>
+      <div class="tip-body">הצמידו את KeySwitch לשורת המשימות כדי לגשת להגדרות בלחיצה אחת בכל עת.</div>
+      <button class="pin-btn" id="pinBtn">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+        הצמד לשורת המשימות
+      </button>
     </div>
 
     <div class="tip">
-      <div class="tip-title">2. הקיצור שיחסוך לכם זמן ⌨️</div>
-      <div class="tip-body">רוצים להמיר טקסט קיים? סמנו אותו ולחצו על <kbd>Alt + Shift + J</kbd> כדי להחליף את שפתו ברגע — בכל מקום.</div>
+      <div class="tip-title">2. קיצור המקלדת שיחסוך לכם זמן ⌨️</div>
+      <div class="tip-body">רוצים להמיר טקסט קיים? סמנו אותו ולחצו <kbd>Alt + Shift + J</kbd> כדי להחליף את שפתו בן-רגע — בכל תוכנה שהיא.</div>
     </div>
 
     <div class="tip">
-      <div class="tip-title">3. גישה מהירה להגדרות 🔎</div>
-      <div class="tip-body">חפשו "KeySwitch" בשורת החיפוש של Windows, או לחצו על האייקון של KeySwitch במגש המערכת (ליד השעון) — כדי לפתוח את ההגדרות בכל עת.</div>
+      <div class="tip-title">3. גישה להגדרות 🔎</div>
+      <div class="tip-body">חפשו "KeySwitch" בשורת החיפוש של Windows, או לחצו על אייקון KeySwitch במגש המערכת (ליד השעון) — כדי לפתוח את ההגדרות בכל עת.</div>
     </div>
 
     <div class="try-title">🚀 בואו ננסה!</div>
