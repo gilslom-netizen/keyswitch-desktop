@@ -23,7 +23,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   const donateLink = document.getElementById('donateLink');
 
   async function doConvert(text) {
-    if (!text) { resultEl.textContent = ''; return; }
+    if (!text) {
+      resultEl.textContent = '';
+      if (pasteArea) pasteArea.removeAttribute('dir');
+      return;
+    }
+    const converted = await ks.convertText(text);
+    resultEl.textContent = converted;
+    const isHeb = /[א-ת]/.test(converted);
+    resultEl.dir = isHeb ? 'rtl' : 'ltr';
+    if (pasteArea) pasteArea.dir = isHeb ? 'rtl' : 'ltr';
+  }
     const converted = await ks.convertText(text);
     resultEl.textContent = converted;
     resultEl.dir = /[\u05D0-\u05EA]/.test(converted) ? 'rtl' : 'ltr';
@@ -31,22 +41,19 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Auto-convert on paste
   if (pasteArea) {
-    pasteArea.addEventListener('paste', (e) => {
-      // Let the paste happen, then convert
-      setTimeout(async () => {
-        await doConvert(pasteArea.value);
-      }, 0);
+    pasteArea.addEventListener('paste', () => {
+      setTimeout(() => doConvert(pasteArea.value), 0);
     });
     // Also convert on Enter key press
-    pasteArea.addEventListener('keydown', async (e) => {
+    pasteArea.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        await doConvert(pasteArea.value);
+        doConvert(pasteArea.value);
       }
     });
     // Clear result when textarea is cleared
-    pasteArea.addEventListener('input', async () => {
-      if (!pasteArea.value) resultEl.textContent = '';
+    pasteArea.addEventListener('input', () => {
+      doConvert(pasteArea.value);
     });
   }
 
