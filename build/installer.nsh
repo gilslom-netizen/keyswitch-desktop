@@ -108,10 +108,8 @@
 ; ---------------------------------------------------------------------------
 ; MUI2 reads these LangStrings for the finish page header and body.
 ; We override them here (after MUI2.nsh is included by the !include above).
-LangString MUI_TEXT_FINISH_INFO_TITLE 1037 "ההתקנה הסתיימה בהצלחה! ✓"
-LangString MUI_TEXT_FINISH_INFO_TEXT 1037 "KeySwitch מותקן ומוכן לשימוש.$\r$\nהתוכנה תעלה אוטומטית ברקע."
-LangString MUI_TEXT_FINISH_INFO_TITLE 1033 "Installation Complete! ✓"
-LangString MUI_TEXT_FINISH_INFO_TEXT 1033 "KeySwitch is installed and ready to use.$\r$\nIt will run automatically in the background."
+!define MUI_FINISHPAGE_TITLE "ההתקנה הסתיימה בהצלחה! ✓"
+!define MUI_FINISHPAGE_TEXT "KeySwitch מותקן ומוכן לשימוש.$\r$\nהתוכנה תעלה אוטומטית ברקע."
 
 Var KsDialog
 Var KsChkAC
