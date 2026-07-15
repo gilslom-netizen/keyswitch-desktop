@@ -6,8 +6,7 @@
 document.addEventListener('DOMContentLoaded', async () => {
   const ks = window.keyswitch;
 
-  const inputEl = document.getElementById('inputText');
-  const convertBtn = document.getElementById('convertBtn');
+  const pasteArea = document.getElementById('pasteArea');
   const resultEl = document.getElementById('resultBox');
   const copyBtn = document.getElementById('copyBtn');
   const settingsBtn = document.getElementById('settingsBtn');
@@ -23,17 +22,33 @@ document.addEventListener('DOMContentLoaded', async () => {
   const backBtn = document.getElementById('backBtn');
   const donateLink = document.getElementById('donateLink');
 
-  async function doConvert() {
-    const text = inputEl.value;
+  async function doConvert(text) {
     if (!text) { resultEl.textContent = ''; return; }
     const converted = await ks.convertText(text);
     resultEl.textContent = converted;
-    resultEl.dir = /[֐-׿]/.test(converted) ? 'rtl' : 'ltr';
+    resultEl.dir = /[\u05D0-\u05EA]/.test(converted) ? 'rtl' : 'ltr';
   }
 
-  convertBtn.addEventListener('click', doConvert);
-  inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doConvert(); } });
-  inputEl.addEventListener('input', doConvert);
+  // Auto-convert on paste
+  if (pasteArea) {
+    pasteArea.addEventListener('paste', (e) => {
+      // Let the paste happen, then convert
+      setTimeout(async () => {
+        await doConvert(pasteArea.value);
+      }, 0);
+    });
+    // Also convert on Enter key press
+    pasteArea.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        await doConvert(pasteArea.value);
+      }
+    });
+    // Clear result when textarea is cleared
+    pasteArea.addEventListener('input', async () => {
+      if (!pasteArea.value) resultEl.textContent = '';
+    });
+  }
 
   copyBtn.addEventListener('click', async () => {
     const text = resultEl.textContent;
@@ -148,5 +163,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (key === 'manualShortcut') { shortcutCapture.textContent = value; shortcutHint.textContent = value; }
   });
 
-  inputEl.focus();
+  if (pasteArea) pasteArea.focus();
 });
