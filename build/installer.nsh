@@ -103,6 +103,16 @@
 ; error by electron-builder, aborting the whole build.
 !ifndef BUILD_UNINSTALLER
 
+; ---------------------------------------------------------------------------
+; Finish-page text — friendlier than the default "Wizard is complete"
+; ---------------------------------------------------------------------------
+; MUI2 reads these LangStrings for the finish page header and body.
+; We override them here (after MUI2.nsh is included by the !include above).
+LangString MUI_TEXT_FINISH_INFO_TITLE ${LANG_HEBREW} "ההתקנה הסתיימה בהצלחה! ✓"
+LangString MUI_TEXT_FINISH_INFO_TEXT ${LANG_HEBREW} "KeySwitch מותקן ומוכן לשימוש.$\r$\nהתוכנה תעלה אוטומטית ברקע."
+LangString MUI_TEXT_FINISH_INFO_TITLE ${LANG_ENGLISH} "Installation Complete! ✓"
+LangString MUI_TEXT_FINISH_INFO_TEXT ${LANG_ENGLISH} "KeySwitch is installed and ready to use.$\r$\nIt will run automatically in the background."
+
 Var KsDialog
 Var KsChkAC
 Var KsChkAT
@@ -296,6 +306,15 @@ Function KsSettingsPageLeave
 FunctionEnd
 
 ; --- Write %APPDATA%\KeySwitch\settings.json ---------------------------------
+; ---------------------------------------------------------------------------
+; Progress-bar fix: suppress the uninstaller-extraction detail print so
+; the bar advances smoothly from 0 → 100 % in one pass instead of
+; going 0 → 50 % (uninstaller stub) then restarting from 0 → 100 %.
+; ---------------------------------------------------------------------------
+!macro customInstallMode
+  SetDetailsPrint none
+!macroend
+
 !macro customInstall
   ; Silent installs / skipped page: still seed settings when a token was given
   ; or when this is a fresh install with no settings file yet.
