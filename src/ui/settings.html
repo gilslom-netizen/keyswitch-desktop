@@ -90,9 +90,9 @@
     .convert-textarea {
       width: 100%; background: #16213e; border: 1px solid #0f3460; border-radius: 7px;
       color: #f0f0f0; padding: 8px 10px; font-size: 13px; outline: none;
-      transition: border-color 0.2s; direction: auto; resize: none;
+      transition: border-color 0.2s; resize: none;
       font-family: inherit; min-height: 60px; max-height: 120px; overflow-y: auto;
-      user-select: text;
+      user-select: text; unicode-bidi: plaintext;
     }
     .convert-textarea:focus { border-color: #4a90e2; }
     .convert-textarea::placeholder { color: #4a6080; }
@@ -237,11 +237,10 @@
         id="pasteArea"
         class="convert-textarea"
         placeholder="הדביקו כאן טקסט — ייומר אוטומטית..."
-        dir="auto"
         rows="3"
         spellcheck="false"
       ></textarea>
-      <div class="convert-hint">המרה מתבצעת אוטומטית עם ההדבקה. ניתן גם להקליד ולחץ Enter.</div>
+      <div class="convert-hint">המרה מתבצעת אוטומטית עם ההדבקה. ניתן גם להקליד ולחצו Enter.</div>
     </div>
 
     <label>תוצאה</label>
