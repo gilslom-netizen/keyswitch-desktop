@@ -82,17 +82,31 @@
     }
 
     label { font-size: 12px; color: #6a8abf; display: block; margin-bottom: 5px; }
+
+    /* Manual convert textarea */
+    .convert-section { margin-bottom: 12px; }
+    .convert-label { font-size: 12px; color: #6a8abf; margin-bottom: 5px; display: flex; align-items: center; gap: 6px; }
+    .convert-label span { flex: 1; }
+    .convert-textarea {
+      width: 100%; background: #16213e; border: 1px solid #0f3460; border-radius: 7px;
+      color: #f0f0f0; padding: 8px 10px; font-size: 13px; outline: none;
+      transition: border-color 0.2s; direction: auto; resize: none;
+      font-family: inherit; min-height: 60px; max-height: 120px; overflow-y: auto;
+      user-select: text;
+    }
+    .convert-textarea:focus { border-color: #4a90e2; }
+    .convert-textarea::placeholder { color: #4a6080; }
+    .convert-hint { font-size: 10.5px; color: #4a6080; margin-top: 4px; }
+
     .input-row { display: flex; gap: 8px; margin-bottom: 12px; }
     input[type="text"] {
       flex: 1; background: #16213e; border: 1px solid #0f3460; border-radius: 7px;
       color: #f0f0f0; padding: 7px 10px; font-size: 13px; outline: none; transition: border-color 0.2s; direction: auto;
-      font-family: inherit; user-select: text;
     }
     input[type="text"]:focus { border-color: #4a90e2; }
     .convert-btn {
       background: #4a90e2; color: #fff; border: none; border-radius: 7px;
       padding: 7px 14px; cursor: pointer; font-size: 13px; white-space: nowrap; font-weight: 600; transition: background 0.2s;
-      font-family: inherit;
     }
     .convert-btn:hover { background: #357abd; }
 
@@ -160,17 +174,17 @@
   </div>
 
   <div class="unsupported" id="unsupportedBox">
-    ⚠️ מערכת ההפעלה הזו אינה Windows — התיקון האוטומטי והקיצור הגלובלי פעילים רק ב-Windows. ההמרה הידנית למטה עובדת כרגיל.
+    ⚠️ מערכת ההפעלה אינה Windows — התיקון האוטומטי והקיצור הגלובלי פעילים רק ב-Windows. המרה ידנית בתיבה למטה עובדת כרגיל.
   </div>
 
   <div id="settingsView" style="display:none;">
     <div class="settings-title">⚙️ הגדרות</div>
     <div class="toggle-row">
-      <div>תיקון אוטומטי בזמן הקלדה<div class="sub">זיהוי שפה שגויה, החלפת שפת המקלדת ותיקון תוך כדי כתיבה</div></div>
+      <div>תיקון אוטומטי בזמן הקלדה<div class="sub">זיהוי שפה שגויה, החלפת פריסת המקלדת ותיקון תוך כדי כתיבה</div></div>
       <label class="switch"><input type="checkbox" id="autocorrectToggle" /><span class="slider"></span></label>
     </div>
     <div class="toggle-row">
-      <div>התראה על תיקון אוטומטי<div class="sub">מה יקרה כשמילה מתוקנת אוטומטית</div></div>
+      <div>התראה על תיקון אוטומטי<div class="sub">מה יקרה כאשר מילה מתוקנת אוטומטית</div></div>
       <select id="autoNotifySelect" class="lang-select">
         <option value="toast">הודעה צפה</option>
         <option value="sound">צליל בלבד</option>
@@ -178,23 +192,23 @@
       </select>
     </div>
     <div class="toggle-row">
-      <div>הצג הודעה בלחיצה על קיצור<div class="sub">הצגת הודעה לאחר המרה ידנית</div></div>
+      <div>הצג הודעה לאחר המרה ידנית<div class="sub">הצגת הודעה לאחר שימוש בקיצור המקלדת</div></div>
       <label class="switch"><input type="checkbox" id="showManualToastToggle" /><span class="slider"></span></label>
     </div>
     <div class="toggle-row">
       <div>שפת הקלדה עיקרית<div class="sub">משפיעה על דיוק הזיהוי האוטומטי</div></div>
       <select id="primaryLangSelect" class="lang-select">
         <option value="he">עברית</option>
-        <option value="mixed">חצי חצי</option>
+        <option value="mixed">חצי-חצי</option>
         <option value="en">אנגלית</option>
       </select>
     </div>
     <div class="toggle-row">
-      <div>הפעלה אוטומטית עם Windows<div class="sub">KeySwitch יעלה ברקע בכניסה למחשב</div></div>
+      <div>הפעלה אוטומטית עם Windows<div class="sub">KeySwitch יעלה ברקע עם כניסה למחשב</div></div>
       <label class="switch"><input type="checkbox" id="launchAtLoginToggle" /><span class="slider"></span></label>
     </div>
     <div class="toggle-row">
-      <div>קיצור מקלדת להמרה ידנית<div class="sub">לחצו על הקיצור ואז הקישו צירוף חדש</div></div>
+      <div>קיצור מקלדת להמרה ידנית<div class="sub">לחצו על הקיצור ואז הקישו את הצירוף החדש</div></div>
       <div class="shortcut-capture" id="shortcutCapture" tabindex="0">Alt+Shift+J</div>
     </div>
     <button class="settings-action settings-back" id="backBtn">חזרה</button>
@@ -204,28 +218,39 @@
     <div class="how-to" id="statsBox" style="display:none; background: linear-gradient(135deg, #16213e 0%, #1a2a4a 100%); border-color: #4a90e2;">
       <div class="how-to-title" style="color: #fff; display: flex; align-items: center; gap: 8px;"><span>📊</span> הסטטיסטיקה שלך</div>
       <div style="font-size: 13px; color: #b0c4de;">חסכנו לך כבר <strong id="totalSaved" style="color: #7eb8f7; font-size: 15px;">0</strong> טעויות! 🥳</div>
-      <div style="font-size: 11px; color: #6a8abf; margin-top: 4px;">מתוכם:</div>
-      <div class="stats-row"><span>תרגום אוטומטי:</span><span id="autoStats" class="stats-val">0</span></div>
-      <div class="stats-row"><span>החלפה בלחיצת כפתור:</span><span id="manualStats" class="stats-val">0</span></div>
+      <div style="font-size: 11px; color: #6a8abf; margin-top: 4px;">מתוכן:</div>
+      <div class="stats-row"><span>תיקון אוטומטי:</span><span id="autoStats" class="stats-val">0</span></div>
+      <div class="stats-row"><span>המרה ידנית:</span><span id="manualStats" class="stats-val">0</span></div>
     </div>
     <div class="how-to">
       <div class="how-to-title">💡 איך להשתמש ב-KeySwitch:</div>
-      <div class="row"><span>⚡</span><span>פשוט תקלידו — טעות שפה תתוקן ושפת המקלדת תוחלף אוטומטית</span></div>
+      <div class="row"><span>⚡</span><span>פשוט הקלידו — טעות שפה תתוקן ופריסת המקלדת תוחלף אוטומטית</span></div>
       <div class="row"><span>⌨️</span><span>סמנו טקסט בכל תוכנה ולחצו <kbd id="shortcutHint">Alt+Shift+J</kbd></span></div>
-      <div class="row"><span>🔠</span><span>נשאר CapsLock דלוק? נכבה אותו ונתקן את הטקסט</span></div>
+      <div class="row"><span>🔠</span><span>הדביקו טקסט בתיבת ההמרה למטה לתרגום ידני מיידי</span></div>
     </div>
-    <label>טקסט להמרה</label>
-    <div class="input-row">
-      <input type="text" id="inputText" placeholder="הדביקו טקסט כאן..." autofocus />
-      <button class="convert-btn" id="convertBtn">המר</button>
+
+    <div class="convert-section">
+      <div class="convert-label">
+        <span>🔠 המרה ידנית — הדביקו טקסט</span>
+      </div>
+      <textarea
+        id="pasteArea"
+        class="convert-textarea"
+        placeholder="הדביקו כאן טקסט — ייומר אוטומטית..."
+        dir="auto"
+        rows="3"
+        spellcheck="false"
+      ></textarea>
+      <div class="convert-hint">המרה מתבצעת אוטומטית עם ההדבקה. ניתן גם להקליד ולחץ Enter.</div>
     </div>
+
     <label>תוצאה</label>
     <div class="result-row">
       <button class="copy-btn" id="copyBtn" title="העתק ללוח">📋</button>
       <span class="result-text" id="resultBox" dir="auto"></span>
     </div>
     <hr class="divider" />
-    <div class="donate-row">❤️ אהבתם את KeySwitch? <a href="https://www.paypal.com/ncp/payment/TCZCRSCYJRR9G" id="donateLink">תרמו ועזרו לנו להמשיך</a></div>
+    <div class="donate-row">❤️ אהבתם את KeySwitch? <a href="https://www.paypal.com/ncp/payment/TCZCRSCYJRR9G" id="donateLink">תרמו ועזרו לנו להמשיך לפתח</a></div>
   </div>
   <script src="settings.js"></script>
 </body>
