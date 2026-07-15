@@ -34,11 +34,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     resultEl.dir = isHeb ? 'rtl' : 'ltr';
     if (pasteArea) pasteArea.dir = isHeb ? 'rtl' : 'ltr';
   }
-    const converted = await ks.convertText(text);
-    resultEl.textContent = converted;
-    resultEl.dir = /[\u05D0-\u05EA]/.test(converted) ? 'rtl' : 'ltr';
-  }
-
   // Auto-convert on paste
   if (pasteArea) {
     pasteArea.addEventListener('paste', () => {
