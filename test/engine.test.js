@@ -305,6 +305,56 @@ test('engine: stale space event (processing lag) skips the correction instead of
   assert.ok(native.calls.typed.includes('שלום'), 'fresh space must still correct');
 });
 
+test('engine: a wall-clock step does not permanently disable detection', () => {
+  // Regression test for the "sometimes it just stops correcting" bug: the
+  // lag-gate baseline was the ALL-TIME minimum of (Date.now() - event.time).
+  // Date.now() is NTP-disciplined (steps on time sync / resume from sleep)
+  // while hook timestamps come from the tick counter, so after any forward
+  // wall-clock step >150ms every event looked "late" forever and evaluation
+  // was silently skipped until the app restarted.
+  const keymapK = require('../src/engine/keymap').UiohookKey;
+  const native = makeFakeNative({ layout: 'en' });
+  const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
+
+  // Calibrate the baseline with fresh events (a word no dictionary knows, so
+  // no correction fires and the fake layout stays 'en'), then the wall clock
+  // steps forward 5s: every event from here on reports a constant 5s "lag".
+  for (const k of [keymapK.X, keymapK.K, keymapK.C, keymapK.D]) pressKey(engine, k);
+  pressKey(engine, keymapK.Space);
+  engine.resetRun();
+
+  for (const k of [keymapK.A, keymapK.K, keymapK.U, keymapK.O]) pressKey(engine, k, { lagMs: 5000 });
+  pressKey(engine, keymapK.Space, { lagMs: 5000 });
+  assert.strictEqual(native.calls.typed, '', 'right after the step the gate correctly holds');
+
+  // The apparent lag persists past LAG_RECAL_MS — real event-loop lag cannot
+  // do that (processing events proves the loop is live), so the engine must
+  // re-anchor its baseline and come back to life instead of staying dead.
+  engine._lagSince = Date.now() - 2500;
+  for (const k of [keymapK.A, keymapK.K, keymapK.U, keymapK.O]) pressKey(engine, k, { lagMs: 5000 });
+  pressKey(engine, keymapK.Space, { lagMs: 5000 });
+  assert.ok(native.calls.typed.includes('שלום'),
+    'detection must recover after the clocks are re-anchored');
+});
+
+test('engine: a backward wall-clock step re-anchors immediately and detection stays live', () => {
+  const keymapK = require('../src/engine/keymap').UiohookKey;
+  const native = makeFakeNative({ layout: 'en' });
+  const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
+
+  for (const k of [keymapK.X, keymapK.K, keymapK.C, keymapK.D]) pressKey(engine, k);
+  pressKey(engine, keymapK.Space);
+  engine.resetRun();
+
+  // Wall clock steps BACK 5s → skew shrinks below the baseline. That must be
+  // adopted as the new baseline on the spot (negative lag means "impossibly
+  // early", not "late"), so the very next word still corrects.
+  for (const k of [keymapK.A, keymapK.K, keymapK.U, keymapK.O]) pressKey(engine, k, { lagMs: -5000 });
+  pressKey(engine, keymapK.Space, { lagMs: -5000 });
+  assert.ok(native.calls.typed.includes('שלום'),
+    'a backward clock step must not disturb detection at all');
+});
+
 test('engine: real Backspace right after a correction is processed once echoes are consumed', () => {
   const keymapK = require('../src/engine/keymap').UiohookKey;
   const native = makeFakeNative({ layout: 'en' });

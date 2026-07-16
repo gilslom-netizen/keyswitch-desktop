@@ -50,6 +50,17 @@ const INJECT_GUARD_MS = 600;
 // skipped for that word instead (a missed correction is harmless; a corrupted
 // line is not).
 const MAX_EVENT_LAG_MS = 150;
+// Apparent lag that persists longer than this is not lag at all. Genuine
+// event-loop lag is over the moment we are running again — and we ARE running
+// (we're processing the event) — so a stale burst clears within milliseconds.
+// A "delay" that every event keeps reporting for seconds on end means the two
+// clocks moved apart: Date.now() is the NTP-disciplined wall clock (steps on
+// time sync / resume from sleep) while hook timestamps come from the tick
+// counter, and the two also drift by seconds per day on a long tray session.
+// Without this recalibration a single forward wall-clock step >150ms would
+// leave every future event looking "late" — and detection silently dead until
+// the app restarts (the "sometimes it just stops correcting" bug).
+const LAG_RECAL_MS = 2000;
 
 const isWordChar = (c) => c != null && /[A-Za-z֐-׿0-9']/.test(c);
 const isBoundaryChar = (c) => c != null && !isWordChar(c);
@@ -90,8 +101,10 @@ class AutocorrectEngine extends EventEmitter {
     this._injectGuard = null;
     // Calibration for _eventLag(): minimum observed skew between our clock
     // and the hook thread's event timestamps (which use an arbitrary base —
-    // milliseconds since boot on Windows).
+    // milliseconds since boot on Windows), plus the start time of the current
+    // streak of above-gate readings (see LAG_RECAL_MS).
     this._timeSkew = null;
+    this._lagSince = 0;
 
     this.wordState = settings.get('acWordState') || {};
     this.cooldownUntil = 0;
@@ -165,18 +178,36 @@ class AutocorrectEngine extends EventEmitter {
 
   // How late are we processing this hook event, in ms? The hook thread stamps
   // events with its own clock (arbitrary base), so the offset to Date.now()
-  // is unknown — but it is CONSTANT, and the smallest offset we ever observe
-  // is the zero-lag baseline. Anything above that baseline is genuine
-  // processing delay. Recalibrates itself if the clocks jump apart (system
-  // suspend/resume, tick-counter wrap).
+  // is unknown — the smallest offset observed so far is the zero-lag
+  // baseline, and anything above it is processing delay. But the two clocks
+  // are NOT locked to each other (wall-clock time sync, suspend/resume, tick
+  // drift), so the baseline must never be trusted forever: a reading below
+  // the baseline adopts it immediately, and a streak of above-gate readings
+  // that outlives LAG_RECAL_MS proves the clocks moved apart — real lag
+  // cannot persist, because processing this event means the loop is live —
+  // so the baseline is re-anchored instead of gating detection forever.
   _eventLag(e) {
     if (!e || typeof e.time !== 'number' || !isFinite(e.time) || e.time <= 0) return 0;
-    const skew = Date.now() - e.time;
-    if (this._timeSkew === null || skew < this._timeSkew ||
-        Math.abs(skew - this._timeSkew) > 10 * 60 * 1000) {
+    const now = Date.now();
+    const skew = now - e.time;
+    if (this._timeSkew === null || skew <= this._timeSkew) {
       this._timeSkew = skew;
+      this._lagSince = 0;
+      return 0;
     }
-    return skew - this._timeSkew;
+    const lag = skew - this._timeSkew;
+    if (lag <= MAX_EVENT_LAG_MS) {
+      this._lagSince = 0;
+      return lag;
+    }
+    if (!this._lagSince) {
+      this._lagSince = now;
+    } else if (now - this._lagSince > LAG_RECAL_MS) {
+      this._timeSkew = skew;
+      this._lagSince = 0;
+      return 0;
+    }
+    return lag;
   }
 
   // A hook callback must never throw into uiohook's native dispatcher — an

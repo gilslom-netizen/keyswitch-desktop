@@ -23,6 +23,10 @@
 ;      %APPDATA%\KeySwitch\settings.json — the exact file the app reads.
 ;      On upgrade (settings.json already exists) the page is skipped unless a
 ;      KSCFG token explicitly asks to override.
+;   4. A progress bar that behaves like a progress bar (see "OWNED PROGRESS
+;      BAR" below): starts at 0% when installing starts, keeps moving at a
+;      steady pace, NEVER moves backwards, and reaches 100% exactly when the
+;      installation completes.
 ; =============================================================================
 
 ; electron-builder injects this file via a command-line -X!include BEFORE its
@@ -33,6 +37,147 @@
 !include MUI2.nsh
 !include nsDialogs.nsh
 !include LogicLib.nsh
+!include FileFunc.nsh
+
+; =============================================================================
+; OWNED PROGRESS BAR
+; =============================================================================
+; The stock electron-builder install page's progress bar is driven by THREE
+; uncoordinated writers, which is why it looks broken no matter how the
+; section is tuned:
+;   1. NSIS's own engine weighs progress by instruction data size — and the
+;      single `File` that unpacks the embedded app archive into $PLUGINSDIR
+;      carries almost ALL the weight, so the bar races to ~90% in the first
+;      seconds;
+;   2. the Nsis7z plugin then takes the bar over with its own scale while it
+;      extracts that archive — visibly jumping the bar BACKWARDS mid-install;
+;   3. the tail (CopyFiles into $INSTDIR, shortcuts, registry, settings) has
+;      almost no weight, so the bar sits at ~100% while work is still going.
+;
+; Fix: take ownership. When the install page appears (KsInstFilesShow):
+;   * the stock bar (control id 1004) is hidden — NSIS and Nsis7z keep
+;     happily messaging the hidden control;
+;   * an identical-looking progress bar (same rect, same styles, so RTL and
+;     theming match) is created in its place — ONLY KeySwitch writes to it;
+;   * the installer relaunches its own exe hidden with /KSPROG flags: that
+;     instance (KsMaybeRunProgressWatcher, exits in .onInit long before any
+;     UI or the single-instance mutex) is a WATCHER that drives the visible
+;     bar every 100ms. A separate process is required because NSIS cannot
+;     safely execute script on a timer while the install section runs
+;     (script timers would race the engine's shared string buffers).
+;
+; The watcher's position is monotonic BY CONSTRUCTION — it only ever takes
+; the maximum of:
+;   * its own eased motion toward 98.5% (so the bar never freezes, even
+;     inside long opaque steps like CopyFiles);
+;   * the REAL extraction progress mirrored from the hidden stock bar,
+;     rescaled into 0..87% (Nsis7z's backward resets are simply ignored
+;     because a maximum can't go down);
+;   * milestone floors the install section drops as flag files in
+;     $PLUGINSDIR: files-in-place → 90%, settings written → 96%.
+; When the section completes, .onInstSuccess drops the "done" flag: the
+; watcher sets 100% and exits. So 0% is when installing starts, 100% is when
+; installing is actually finished, and there is no path by which the bar can
+; ever move backwards. If the watcher could not start at all, the milestone
+; writers below notice the bar never moved and drive it directly (coarse but
+; still monotonic and still ending at 100%).
+;
+; Progress-bar messages (WinUser/CommCtrl): PBM_SETPOS=0x0402,
+; PBM_SETRANGE32=0x0406, PBM_GETRANGE=0x0407 (wParam=0 → high limit),
+; PBM_GETPOS=0x0408. The visible bar's range is 0..1000.
+
+; Runs first thing in .onInit (both installer and uninstaller-stub builds
+; call preInit, so this lives outside the BUILD_UNINSTALLER guard). A normal
+; launch returns immediately; a /KSPROG launch never comes back.
+!macro preInit
+  Call KsMaybeRunProgressWatcher
+!macroend
+
+Function KsMaybeRunProgressWatcher
+  ${GetParameters} $R0
+  ClearErrors
+  ${GetOptions} $R0 "/KSPROG=" $1     ; visible (overlay) bar HWND
+  ${If} ${Errors}
+    Return                            ; normal launch — continue as installer
+  ${EndIf}
+  ClearErrors
+  ${GetOptions} $R0 "/KSPROGN=" $2    ; hidden stock bar HWND
+  ${If} ${Errors}
+    StrCpy $2 0
+  ${EndIf}
+  ClearErrors
+  ${GetOptions} $R0 "/KSPROGD=" $8    ; installer's $PLUGINSDIR (flag files)
+  ${If} ${Errors}
+    StrCpy $8 ""
+  ${EndIf}
+
+  StrCpy $3 0                         ; current position, 0..1000
+  StrCpy $9 9000                      ; safety budget: ~15 minutes of ticks
+  ${Do}
+    IntOp $9 $9 - 1
+    ${If} $9 < 0
+      Quit
+    ${EndIf}
+    ; install dialog gone (finished / cancelled) → nothing left to drive
+    System::Call 'user32::IsWindow(p r1) i .r4'
+    ${If} $4 = 0
+      Quit
+    ${EndIf}
+    ; section completed → snap to 100% and stop; this is the ONLY way the
+    ; bar reaches full, so "100%" always means "actually done"
+    ${If} $8 != ""
+    ${AndIf} ${FileExists} "$8\ks-done"
+      SendMessage $1 0x0402 1000 0
+      Quit
+    ${EndIf}
+    ; milestone floors dropped by the install section
+    ${If} $8 != ""
+    ${AndIf} ${FileExists} "$8\ks-floor-960"
+      ${If} $3 < 960
+        StrCpy $3 960
+      ${EndIf}
+    ${ElseIf} $8 != ""
+    ${AndIf} ${FileExists} "$8\ks-floor-900"
+      ${If} $3 < 900
+        StrCpy $3 900
+      ${EndIf}
+    ${EndIf}
+    ; mirror REAL extraction progress from the hidden stock bar into 0..870.
+    ; Taking the max means Nsis7z's mid-install range resets push nothing
+    ; backwards — dips are ignored, rises count.
+    ${If} $2 <> 0
+      SendMessage $2 0x0408 0 0 $5    ; PBM_GETPOS
+      SendMessage $2 0x0407 0 0 $6    ; PBM_GETRANGE → high limit
+      ${If} $6 > 1000000              ; keep 32-bit IntOp math overflow-free
+        IntOp $6 $6 / 1024
+        IntOp $5 $5 / 1024
+      ${EndIf}
+      ${If} $6 > 0
+        IntOp $5 $5 * 870
+        IntOp $5 $5 / $6
+        ${If} $5 > 870
+          StrCpy $5 870
+        ${EndIf}
+        ${If} $5 > $3
+          StrCpy $3 $5
+        ${EndIf}
+      ${EndIf}
+    ${EndIf}
+    ; steady easing toward 985 so the bar visibly keeps moving even inside
+    ; long steps that report nothing (CopyFiles, the old-version uninstall)
+    IntOp $7 985 - $3
+    IntOp $7 $7 / 80
+    ${If} $7 < 1
+      StrCpy $7 1
+    ${EndIf}
+    IntOp $3 $3 + $7
+    ${If} $3 > 985
+      StrCpy $3 985
+    ${EndIf}
+    SendMessage $1 0x0402 $3 0        ; PBM_SETPOS
+    Sleep 100
+  ${Loop}
+FunctionEnd
 
 ; ---------------------------------------------------------------------------
 ; Silently close a running KeySwitch before installing/updating.
@@ -102,6 +247,9 @@
 ; uninstaller pass — NSIS's "not referenced" warning is treated as a fatal
 ; error by electron-builder, aborting the whole build.
 !ifndef BUILD_UNINSTALLER
+
+Var KsBar        ; our visible progress bar (overlay owned by the watcher)
+Var KsNBar       ; the hidden stock progress bar (id 1004)
 
 Var KsDialog
 Var KsChkAC
@@ -195,7 +343,93 @@ FunctionEnd
 ; --- The settings page (between the directory page and the install page) -----
 !macro customPageAfterChangeDir
   Page custom KsSettingsPageCreate KsSettingsPageLeave
+  ; The very next MUI page electron-builder inserts after this macro is
+  ; MUI_PAGE_INSTFILES, so this SHOW hook binds to the install page — where
+  ; we take ownership of the progress bar (see the header at the top).
+  !define MUI_PAGE_CUSTOMFUNCTION_SHOW KsInstFilesShow
 !macroend
+
+; Runs on the UI thread when the install page is shown, BEFORE the install
+; section starts executing: hide the stock bar, clone an identical bar over
+; it, and start the watcher process that will drive it.
+Function KsInstFilesShow
+  FindWindow $0 "#32770" "" $HWNDPARENT   ; inner page dialog
+  ${If} $0 = 0
+    Return
+  ${EndIf}
+  GetDlgItem $1 $0 1004                   ; the stock progress bar
+  ${If} $1 = 0
+    Return
+  ${EndIf}
+  ; the stock bar's rectangle, in the page dialog's client coordinates
+  System::Call '*(i, i, i, i) p .r2'
+  System::Call 'user32::GetWindowRect(p r1, p r2)'
+  System::Call 'user32::MapWindowPoints(p 0, p r0, p r2, i 2)'
+  System::Call '*$2(i .r3, i .r4, i .r5, i .r6)'
+  System::Free $2
+  IntOp $5 $5 - $3                        ; width
+  IntOp $6 $6 - $4                        ; height
+  ; clone the stock bar's styles so ours is pixel-identical (incl. the RTL
+  ; mirroring of the Hebrew installer and the themed smooth fill)
+  System::Call 'user32::GetWindowLongW(p r1, i -16) i .r7'   ; GWL_STYLE
+  System::Call 'user32::GetWindowLongW(p r1, i -20) i .r8'   ; GWL_EXSTYLE
+  System::Call 'user32::CreateWindowExW(i r8, w "msctls_progress32", w "", i r7, i r3, i r4, i r5, i r6, p r0, p 0, p 0, p 0) p .r9'
+  ${If} $9 = 0
+    Return                                ; couldn't create → keep stock behavior
+  ${EndIf}
+  StrCpy $KsBar $9
+  StrCpy $KsNBar $1
+  System::Call 'user32::ShowWindow(p r1, i 0)'               ; SW_HIDE stock bar
+  SendMessage $KsBar 0x0406 0 1000        ; PBM_SETRANGE32 0..1000
+  SendMessage $KsBar 0x0402 0 0           ; PBM_SETPOS 0 — starts at the start
+  Exec '"$EXEPATH" /KSPROG=$KsBar /KSPROGN=$KsNBar /KSPROGD="$PLUGINSDIR"'
+FunctionEnd
+
+; Milestone from the install section: drop a floor flag for the watcher. If
+; the bar never moved, the watcher isn't running (blocked relaunch?) — then
+; drive the bar directly as a coarse fallback (still monotonic: floors only
+; ever go up, and 100% still comes only from .onInstSuccess).
+; $0 = floor value (0..1000)
+Function KsProgressFloor
+  ${If} $KsBar == ""
+    Return
+  ${EndIf}
+  Push $1
+  Push $2
+  FileOpen $1 "$PLUGINSDIR\ks-floor-$0" w
+  FileClose $1
+  SendMessage $KsBar 0x0408 0 0 $2        ; PBM_GETPOS
+  ${If} $2 < 25
+    SendMessage $KsBar 0x0402 $0 0
+  ${EndIf}
+  Pop $2
+  Pop $1
+FunctionEnd
+
+; All application files are inside $INSTDIR — the heavy ~90% of the work is
+; done (electron-builder calls this right after archive decompression+copy).
+!macro customFiles_x64
+  Push $0
+  StrCpy $0 900
+  Call KsProgressFloor
+  Pop $0
+!macroend
+
+; The section finished successfully — this, and only this, completes the bar.
+Function .onInstSuccess
+  ${If} $KsBar != ""
+    Push $1
+    Push $2
+    FileOpen $1 "$PLUGINSDIR\ks-done" w
+    FileClose $1
+    SendMessage $KsBar 0x0408 0 0 $2
+    ${If} $2 < 25
+      SendMessage $KsBar 0x0402 1000 0    ; watcher never ran — finish directly
+    ${EndIf}
+    Pop $2
+    Pop $1
+  ${EndIf}
+FunctionEnd
 
 Function KsSettingsPageCreate
   ; Upgrade with no explicit token: keep the user's existing settings untouched.
@@ -350,6 +584,12 @@ FunctionEnd
     FileWrite $9 '}$\r$\n'
     FileClose $9
   ${EndIf}
+
+  ; settings are written — everything but the final bookkeeping is done
+  Push $0
+  StrCpy $0 960
+  Call KsProgressFloor
+  Pop $0
 !macroend
 
 !endif ; !BUILD_UNINSTALLER
