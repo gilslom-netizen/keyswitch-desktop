@@ -1,7 +1,7 @@
 {
   "name": "keyswitch-desktop",
   "productName": "KeySwitch",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "description": "KeySwitch — תיקון אוטומטי של טעויות שפת מקלדת עברית/אנגלית בכל תוכנה: Word, Excel, דפדפן, דוקס וכל היתר",
   "author": "KeySwitch",
   "license": "MIT",

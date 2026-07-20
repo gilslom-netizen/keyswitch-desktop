@@ -363,11 +363,14 @@ test('engine: real Backspace right after a correction is processed once echoes a
   typeWord(engine, 'akuo'); // buffer is now 'שלום '
   assert.strictEqual(engine.buffer, 'שלום ');
 
-  // The 5 Backspace echoes of our own batch ('akuo ' = 5 erases) are swallowed…
+  // The full echo set of our own batch — 5 Backspaces ('akuo ' erased) and
+  // 5 keycode-0 unicode downs ('שלום ' typed) — is swallowed…
   for (let i = 0; i < 5; i++) pressKey(engine, keymapK.Backspace);
   assert.strictEqual(engine.buffer, 'שלום ', 'echo backspaces must not touch the buffer');
+  for (let i = 0; i < 5; i++) pressKey(engine, 0);
+  assert.strictEqual(engine._injectGuard, null, 'guard must disarm once every echo is consumed');
 
-  // …but the SIXTH Backspace is the user's and must take effect.
+  // …but the NEXT Backspace is the user's and must take effect.
   pressKey(engine, keymapK.Backspace);
   assert.strictEqual(engine.buffer, 'שלום', 'a real backspace after the echoes must be processed');
 });
@@ -405,24 +408,66 @@ test('engine: a hook event that throws inside the handler does not propagate', (
   assert.doesNotThrow(() => pressKey(engine, require('../src/engine/keymap').UiohookKey.A));
 });
 
-test('engine: inject-guard swallows injection echoes but keeps real keystrokes', () => {
-  const keymap = require('../src/engine/keymap');
+test('engine: keystroke racing ahead of the correction batch is repaired, not lost', () => {
+  // Regression test for the "typing while an auto-fix lands corrupts the
+  // text" bug: a key pressed in the instant BEFORE our SendInput batch
+  // reaches the screen first, so the batch's backspaces erase THAT key and
+  // leave the first letter of the mistake behind. The hook stream is screen
+  // order, so such a key arrives before the batch echoes — the engine must
+  // repair the screen instead of pretending the key landed after the fix.
+  const keymapK = keymap.UiohookKey;
   const native = makeFakeNative({ layout: 'en' });
   const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
-  engine._syncWindow();
-  engine.lastKeyTime = Date.now();
-  engine._armInjectGuard();
 
-  const kd = (keycode) => engine._onKeydown({ keycode, shiftKey: false, ctrlKey: false, altKey: false, metaKey: false });
+  for (const k of [keymapK.A, keymapK.K, keymapK.U, keymapK.O]) pressKey(engine, k);
+  pressKey(engine, keymapK.Space); // correction: erase 'akuo ' (5), type 'שלום '
+  assert.strictEqual(native.calls.typed, 'שלום ');
+  native.calls.typed = '';
+  native.calls.backspaces = 0;
 
-  // Echoes of our own SendInput batch (Backspace, and 0 = VK_PACKET/unicode)
-  // must be ignored so they don't corrupt the buffer.
-  kd(keymap.UiohookKey.Backspace);
-  kd(0);
-  assert.strictEqual(engine.buffer, '', 'injection echoes must not enter the buffer');
+  // The raced key: its hook event arrives BEFORE the batch echoes. On screen
+  // the batch erased its character and left the 'a' of 'akuo' behind.
+  pressKey(engine, keymapK.D);
+  assert.strictEqual(engine.buffer, 'שלום ', 'raced key must not enter the model yet');
 
-  // A REAL letter typed during the same guard window must still register —
-  // this is the "typing during a correction gets swallowed" bug being fixed.
-  kd(keymap.UiohookKey.A);
-  assert.strictEqual(engine.buffer, 'a', 'a genuine keystroke during the guard must be kept');
+  // Batch echoes complete (5 backspaces + 5 unicode downs) → repair fires:
+  // erase leftover 'a' + 'שלום ' (6 chars), retype 'שלום ' plus the raced key
+  // mapped to the layout the user meant (D on the Hebrew layout = 'ג').
+  for (let i = 0; i < 5; i++) pressKey(engine, keymapK.Backspace);
+  for (let i = 0; i < 5; i++) pressKey(engine, 0);
+  assert.strictEqual(native.calls.backspaces, 6);
+  assert.strictEqual(native.calls.typed, 'שלום ג');
+  assert.strictEqual(engine.buffer, 'שלום ג');
+  assert.strictEqual(engine.lastFix.typedAfter, 'ג', 'raced key must count as typed-after for revert');
+
+  // The repair is guarded exactly like the original batch — consume its
+  // echoes and confirm everything is calm and in sync.
+  for (let i = 0; i < 6; i++) pressKey(engine, keymapK.Backspace);
+  for (let i = 0; i < 6; i++) pressKey(engine, 0);
+  assert.strictEqual(engine._injectGuard, null);
+  assert.strictEqual(engine.buffer, 'שלום ג');
+});
+
+test('engine: unmodelable key racing the batch drops the run instead of guessing', () => {
+  const keymapK = keymap.UiohookKey;
+  const native = makeFakeNative({ layout: 'en' });
+  const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
+
+  for (const k of [keymapK.A, keymapK.K, keymapK.U, keymapK.O]) pressKey(engine, k);
+  pressKey(engine, keymapK.Space);
+  native.calls.typed = '';
+  native.calls.backspaces = 0;
+
+  // An arrow key raced ahead of the batch: the caret moved before the
+  // replacement landed, so the screen state is unknowable. No repair may be
+  // injected — the run must simply be dropped.
+  pressKey(engine, keymapK.ArrowLeft);
+  for (let i = 0; i < 5; i++) pressKey(engine, keymapK.Backspace);
+  for (let i = 0; i < 5; i++) pressKey(engine, 0);
+
+  assert.strictEqual(native.calls.typed, '', 'no repair batch on an unknowable screen');
+  assert.strictEqual(native.calls.backspaces, 0);
+  assert.strictEqual(engine.buffer, '', 'run dropped');
+  assert.strictEqual(engine.lastFix, null, 'nothing safe to revert');
+  assert.strictEqual(engine._injectGuard, null);
 });
