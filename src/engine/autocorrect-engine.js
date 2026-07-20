@@ -62,7 +62,14 @@ const MAX_EVENT_LAG_MS = 150;
 // the app restarts (the "sometimes it just stops correcting" bug).
 const LAG_RECAL_MS = 2000;
 
-const isWordChar = (c) => c != null && /[A-Za-z֐-׿0-9']/.test(c);
+// ',' '.' '/' ';' are word characters here because those physical keys TYPE
+// LETTERS on the opposite layout (ת ץ . ף on Hebrew; the '/' key is q when
+// flipped back to English) — excluding them cut real letters off the token
+// and the run, so words like זאת ("zt,"), כיף ("fh;") and question
+// ("/וקדאןםמ") were extracted truncated and never corrected (or corrected
+// with their first key dropped). classify() is conservative — a token whose
+// extra punctuation is genuine punctuation simply stays 'unknown'.
+const isWordChar = (c) => c != null && /[A-Za-z֐-׿0-9',./;]/.test(c);
 const isBoundaryChar = (c) => c != null && !isWordChar(c);
 
 // Where should the re-converted block start? Identical semantics to the
@@ -123,7 +130,14 @@ class AutocorrectEngine extends EventEmitter {
     this._onMousedown = this._onMousedown.bind(this);
 
     settings.on('change', (key, value) => {
-      if (key === 'autocorrectEnabled') this.enabled = value !== false;
+      if (key === 'autocorrectEnabled') {
+        this.enabled = value !== false;
+        // While disabled the buffer stops mirroring the screen, so whatever
+        // is in it is stale the moment the feature is toggled. Without this
+        // reset, re-enabling within the freshness window evaluated (and
+        // could "correct") text that no longer matches what's on screen.
+        this.resetRun();
+      }
       if (key === 'primaryLang') dict.applyPrimaryLang(value);
       if (key === 'acWordState' && value) this.wordState = value;
     });
@@ -397,10 +411,24 @@ class AutocorrectEngine extends EventEmitter {
 
   _appendChar(ch) {
     this.buffer += ch;
-    if (this.buffer.length > 2000) this.buffer = this.buffer.slice(-1000);
+    this._trimBuffer();
     if (this.lastFix) {
       if (Date.now() - this.lastFix.time > FIX_TRACK_MS) this._endFixTracking();
       else this.lastFix.typedAfter += ch;
+    }
+  }
+
+  // Cap the run buffer. Trimming shifts every index, so lastFix.runStart —
+  // an index into this buffer — must shift with it (during long continuous
+  // typing with no click/nav/gap the run never resets, so the cap IS reached
+  // and an unadjusted runStart would desync the model on the next revert).
+  _trimBuffer() {
+    if (this.buffer.length <= 2000) return;
+    const cut = this.buffer.length - 1000;
+    this.buffer = this.buffer.slice(cut);
+    if (this.lastFix) {
+      if (this.lastFix.runStart >= cut) this.lastFix.runStart -= cut;
+      else this._endFixTracking();
     }
   }
 
@@ -536,7 +564,7 @@ class AutocorrectEngine extends EventEmitter {
       return;
     }
     this.buffer += strayText;
-    if (this.buffer.length > 2000) this.buffer = this.buffer.slice(-1000);
+    this._trimBuffer();
     if (g.trackFix && this.lastFix) this.lastFix.typedAfter += strayText;
   }
 

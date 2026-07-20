@@ -153,42 +153,60 @@ function hasIntentionalUpper(word, capsActive) {
 // ---------------------------------------------------------------------------
 // CLASSIFICATION: Determines if a word is correctly typed in its current
 // language or if it looks like a keyboard layout mistake.
-// (Identical logic to the extension's classify().)
+//
+// The layout-flip checks run on the RAW token and trim non-letters only AFTER
+// flipping. This matters because several punctuation keys TYPE LETTERS on the
+// other layout — ',' '.' ';' are the keys of ת ץ ף on the Hebrew layout, and
+// '/' and the apostrophe are the keys of q and w — so stripping "punctuation"
+// BEFORE flipping (the old behavior) deleted real letters of the intended
+// word and silently missed extremely common mistakes: every Hebrew word
+// ending in ת/ץ/ף typed on the English layout ("zt," is זאת, "fh;" is כיף),
+// and every English word containing q typed on the Hebrew layout. The
+// 'correct'-language checks still use the stripped core: a correctly-typed
+// word never depends on those keys.
 // ---------------------------------------------------------------------------
 function classify(word, capsActive) {
   const core = word
     .replace(/^[^A-Za-z֐-׿']+/, '')
     .replace(/[^A-Za-z֐-׿]+$/, '');
-  if (core.length < 2) {
-    if (core.length === 1 && FINALS.indexOf(core) >= 0) {
-      const en = swapLayout(core, 'he2en').toLowerCase();
-      if (COMMON_EN.has(en)) return { kind: 'wrong', lang: 'en', direction: 'he2en' };
-    }
-    return { kind: 'unknown' };
-  }
 
   const hasHeb = HEB_RANGE.test(core);
   const hasLat = /[A-Za-z]/.test(core);
   if (hasHeb && hasLat) return { kind: 'unknown' };
 
-  if (hasLat) {
-    if (COMMON_EN.has(core.toLowerCase())) return { kind: 'correct', lang: 'en' };
-    if (hasIntentionalUpper(core, capsActive)) return { kind: 'unknown' };
-    const he = swapLayout(core.toLowerCase(), 'en2he');
+  if (hasHeb) {
+    if (core.length === 1) {
+      if (FINALS.indexOf(core) >= 0) {
+        const en = swapLayout(core, 'he2en').toLowerCase();
+        if (COMMON_EN.has(en)) return { kind: 'wrong', lang: 'en', direction: 'he2en' };
+      }
+      return { kind: 'unknown' };
+    }
+    if (hasMisplacedFinal(core)) return { kind: 'wrong', lang: 'en', direction: 'he2en' };
+    if (COMMON_HE.has(core)) return { kind: 'correct', lang: 'he' };
+    if (core.length > 2 && HE_PREFIXES.indexOf(core[0]) >= 0 && COMMON_HE.has(core.slice(1))) {
+      return { kind: 'correct', lang: 'he' };
+    }
+    const en = swapLayout(word, 'he2en')
+      .replace(/^[^A-Za-z]+/, '')
+      .replace(/[^A-Za-z]+$/, '')
+      .toLowerCase();
+    if (en.length >= 2 && COMMON_EN.has(en)) return { kind: 'wrong', lang: 'en', direction: 'he2en' };
+    return { kind: 'unknown' };
+  }
+
+  // Typed with latin/digit/punctuation keys.
+  if (core.length >= 2 && COMMON_EN.has(core.toLowerCase())) return { kind: 'correct', lang: 'en' };
+  if (hasIntentionalUpper(core, capsActive)) return { kind: 'unknown' };
+  const he = swapLayout(word.toLowerCase(), 'en2he')
+    .replace(/^[^֐-׿]+/, '')
+    .replace(/[^֐-׿]+$/, '');
+  if (he.length >= 2) {
     if (COMMON_HE.has(he)) return { kind: 'wrong', lang: 'he', direction: 'en2he' };
     if (he.length > 2 && HE_PREFIXES.indexOf(he[0]) >= 0 && COMMON_HE.has(he.slice(1))) {
       return { kind: 'wrong', lang: 'he', direction: 'en2he' };
     }
-    return { kind: 'unknown' };
   }
-
-  if (hasMisplacedFinal(core)) return { kind: 'wrong', lang: 'en', direction: 'he2en' };
-  if (COMMON_HE.has(core)) return { kind: 'correct', lang: 'he' };
-  if (core.length > 2 && HE_PREFIXES.indexOf(core[0]) >= 0 && COMMON_HE.has(core.slice(1))) {
-    return { kind: 'correct', lang: 'he' };
-  }
-  const en = swapLayout(core, 'he2en').toLowerCase();
-  if (COMMON_EN.has(en)) return { kind: 'wrong', lang: 'en', direction: 'he2en' };
   return { kind: 'unknown' };
 }
 

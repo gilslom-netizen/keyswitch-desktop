@@ -275,11 +275,27 @@ function updateToastProtectedRect() {
   }
 }
 
+// Deliver a message to the toast renderer, waiting for the page if it is
+// still loading. At app startup (or right after the window was recreated) a
+// correction can fire before toast.html wired its IPC listeners — a message
+// sent straight away would vanish and the toast would pop up EMPTY.
+function sendToToast(channel, payload) {
+  if (!toastWin || toastWin.isDestroyed()) return;
+  const wc = toastWin.webContents;
+  if (wc.isLoading()) {
+    wc.once('did-finish-load', () => {
+      try { wc.send(channel, payload); } catch (e) {}
+    });
+  } else {
+    wc.send(channel, payload);
+  }
+}
+
 function showToast(payload) {
   if (!toastWin || toastWin.isDestroyed()) createToastWindow();
   currentToastType = payload.type || 'info';
   positionToast();
-  toastWin.webContents.send('toast:show', payload);
+  sendToToast('toast:show', payload);
   toastWin.showInactive();
   updateToastProtectedRect();
   clearTimeout(toastHideTimer);
@@ -521,7 +537,7 @@ function playNotifySound() {
   try {
     if (notifyWavBuffer && native.playWav && native.playWav(notifyWavBuffer)) return;
     if (notifySoundDataUri && toastWin && !toastWin.isDestroyed()) {
-      toastWin.webContents.send('sound:play', notifySoundDataUri);
+      sendToToast('sound:play', notifySoundDataUri);
     } else {
       native.beep();
     }
@@ -568,7 +584,12 @@ ipcMain.handle('convert:text', (e, text) => convertFullText(text || ''));
 ipcMain.handle('stats:get', () => getStats());
 ipcMain.on('toast:action', (e, action) => {
   if (action === 'revert') {
-    engine.revertLastFix();
+    // revertLastFix reaches Win32 (SendInput/koffi) — unlike the keyboard-hook
+    // path there is no outer catch here, and a native failure must not become
+    // an uncaught exception in the main process.
+    try { engine.revertLastFix(); } catch (err) {
+      console.error('[KeySwitch] revert failed:', err);
+    }
     hideToast();
   } else if (action === 'disable-auto') {
     settings.set('autocorrectEnabled', false);

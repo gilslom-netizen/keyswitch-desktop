@@ -126,6 +126,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (e.shiftKey) parts.push('Shift');
     if (e.metaKey) parts.push('Super');
     let key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
+    // e.key is layout-dependent: recording while the HEBREW layout is active
+    // yields 'ח' for the J key — not a valid Electron accelerator, so the
+    // shortcut silently failed to register. Use the PHYSICAL key (e.code)
+    // for letters and digits so recording works on any active layout.
+    if (/^Key[A-Z]$/.test(e.code)) key = e.code.slice(3);
+    else if (/^Digit[0-9]$/.test(e.code)) key = e.code.slice(5);
     if (key === ' ') key = 'Space';
     parts.push(key);
     if (parts.length < 2) return; // require at least one modifier
