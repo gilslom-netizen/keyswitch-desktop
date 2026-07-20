@@ -457,30 +457,51 @@ async function manualConvert() {
   if (manualBusy || !native.isSupported) return;
   manualBusy = true;
   try {
+    // Save whatever the user has on the clipboard so the shortcut is
+    // side-effect-free. Text is not enough: if they had an IMAGE copied
+    // (e.g. a screenshot), readText() is '' and restoring '' at the end
+    // would destroy the image — keep the image too and put back whichever
+    // was there.
     const savedText = clipboard.readText();
+    const savedImage = savedText ? null : clipboard.readImage();
+    const restoreClipboard = () => {
+      if (savedImage && !savedImage.isEmpty()) clipboard.writeImage(savedImage);
+      else clipboard.writeText(savedText);
+    };
     const SENTINEL = '__KS_EMPTY_' + Date.now() + '__';
     clipboard.writeText(SENTINEL);
 
     native.sendCtrlCombo(native.VK.C);
-    await sleep(180);
-
-    const selected = clipboard.readText();
+    // Poll instead of one fixed sleep: fast apps deliver the copy within
+    // ~50ms (the shortcut feels instant), while slow ones (Word with a big
+    // selection) get up to 600ms before we conclude nothing was selected —
+    // the old fixed 180ms was both slower for the common case and too short
+    // for the slow one (it showed "select text" even when text WAS selected).
+    let selected = '';
+    for (let waited = 0; waited < 600; waited += 50) {
+      await sleep(50);
+      selected = clipboard.readText();
+      if (selected && selected !== SENTINEL) break;
+    }
     if (!selected || selected === SENTINEL) {
-      clipboard.writeText(savedText);
+      restoreClipboard();
       showToast({ type: 'info', text: 'סמנו טקסט ולחצו שוב על הקיצור' });
       return;
     }
 
     const converted = convertFullText(selected);
     if (converted === selected) {
-      clipboard.writeText(savedText);
+      restoreClipboard();
       return;
     }
 
     clipboard.writeText(converted);
     native.sendCtrlCombo(native.VK.V);
-    await sleep(250);
-    clipboard.writeText(savedText);
+    // Give the target app time to actually process the paste before the
+    // clipboard is restored — restoring too early makes a slow app paste
+    // the user's OLD clipboard content instead of the converted text.
+    await sleep(400);
+    restoreClipboard();
 
     // Align the keyboard layout with the language the user clearly wants now.
     const targetLang = /[֐-׿]/.test(converted) ? 'he' : 'en';
