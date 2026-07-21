@@ -300,6 +300,25 @@ test('engine: does not fire on a word the dictionaries do not know', () => {
   assert.strictEqual(native.calls.typed, '');
 });
 
+test('engine: the persisted rejection map is pruned and never grows without bound', () => {
+  const native = makeFakeNative({ layout: 'en' });
+  const settings = makeFakeSettings();
+  // Seed a large map: many expired one-off rejections (droppable) plus a few
+  // permanent ones (count >= 3) that must be kept.
+  const state = {};
+  const old = Date.now() - 31 * 60 * 1000; // older than the 30-min suppress window
+  for (let i = 0; i < 800; i++) state['h' + i] = { count: 1, last: old };
+  state['keep1'] = { count: 3, last: old };
+  state['keep2'] = { count: 5, last: old };
+  settings.set('acWordState', state);
+
+  const engine = new AutocorrectEngine({ native, settings });
+
+  const keys = Object.keys(engine.wordState);
+  assert.ok(keys.length < 800, `expired one-offs must be pruned (kept ${keys.length})`);
+  assert.ok(engine.wordState.keep1 && engine.wordState.keep2, 'permanent entries must survive');
+});
+
 // Drive the engine through the REAL keydown path (guards, lag gate, layout
 // checks) instead of _appendChar. `time` simulates the hook thread's event
 // timestamp; omit `lagMs` for a fresh event.
@@ -499,6 +518,36 @@ test('engine: English word with q typed on the Hebrew layout keeps its first let
 
   assert.strictEqual(native.calls.typed, 'Question ');
   assert.strictEqual(native.calls.backspaces, 9); // '/וקדאןםמ' + trailing space
+});
+
+test('engine: a follow-up opposite-direction fix never re-flips the previous correction', () => {
+  // Corruption regression: user types "akuo" → corrected to "שלום" and the
+  // layout flips to Hebrew. They keep typing "hello", which now lands as
+  // "יקךךם" on the Hebrew layout. That he2en mistake's run would start at 0
+  // and drag the good "שלום" back into the conversion, turning it into
+  // "Akuo". The run must be clamped to start after the prior fix's output.
+  const keymapK = keymap.UiohookKey;
+  const native = makeFakeNative({ layout: 'en' });
+  const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
+
+  for (const k of [keymapK.A, keymapK.K, keymapK.U, keymapK.O]) pressKey(engine, k);
+  pressKey(engine, keymapK.Space); // → "שלום " on screen, layout now 'he'
+  assert.strictEqual(native.calls.typed, 'שלום ');
+  // consume the correction's echoes so the guard disarms cleanly
+  for (let i = 0; i < 5; i++) pressKey(engine, keymapK.Backspace);
+  for (let i = 0; i < 5; i++) pressKey(engine, 0);
+  native.calls.typed = '';
+  native.calls.backspaces = 0;
+
+  // "hello" on the Hebrew layout → י ק ך ך ם
+  for (const k of [keymapK.H, keymapK.E, keymapK.L, keymapK.L, keymapK.O]) pressKey(engine, k);
+  pressKey(engine, keymapK.Space);
+
+  // Only the second word is re-flipped; "שלום" is untouched.
+  assert.ok(!native.calls.typed.includes('Akuo'), 'the prior fix must not be re-flipped');
+  assert.strictEqual(native.calls.backspaces, 6, 'only "יקךךם " (6 chars) is erased, not the whole line');
+  assert.strictEqual(native.calls.typed.trim(), 'Hello'); // single word → capitalized
+  assert.strictEqual(engine.buffer, 'שלום Hello ');
 });
 
 test('engine: toggling autocorrect off clears the stale run', () => {

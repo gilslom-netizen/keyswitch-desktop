@@ -114,6 +114,10 @@ class AutocorrectEngine extends EventEmitter {
     this._lagSince = 0;
 
     this.wordState = settings.get('acWordState') || {};
+    // A long-lived tray session accumulates a hashed entry per rejected word
+    // forever. Drop the ones that can no longer affect anything at startup so
+    // settings.json can't bloat over months/years (slowing every load & save).
+    if (this._pruneWordState()) this.settings.set('acWordState', this.wordState);
     this.cooldownUntil = 0;
     this.sessionRejections = 0;
     this.hardOff = null; // { windowId, until }
@@ -458,7 +462,22 @@ class AutocorrectEngine extends EventEmitter {
     const decision = this._decideCorrection(word, capsOn);
     if (!decision) return;
 
-    const runStart = computeRunStart(buf, 0, coreEnd, decision.direction);
+    let runStart = computeRunStart(buf, 0, coreEnd, decision.direction);
+    // Never drag a PREVIOUS correction's output back into the run. computeRunStart
+    // stops at correctly-typed OPPOSITE-script words, but a prior fix's text is in
+    // the SAME script we're now converting FROM (e.g. after "akuo"→"שלום" the user
+    // types "hello" on the now-Hebrew layout → "יקךךם"; that he2en mistake's run
+    // would otherwise start at 0 and re-flip the good "שלום" into "Akuo"). The
+    // confidence gate only blocks this when the preceding word was a *correctly
+    // typed* word (pushes 1); a preceding word that we corrected pushes 0, so it
+    // doesn't block — this clamp is what protects the fixed text in that case.
+    if (this.lastFix) {
+      const fixedEnd = this.lastFix.runStart + this.lastFix.converted.length;
+      if (runStart < fixedEnd && fixedEnd <= start) {
+        runStart = fixedEnd;
+        while (runStart < coreEnd && /\s/.test(buf[runStart])) runStart++;
+      }
+    }
     const runOriginal = buf.slice(runStart);
     const trailMatch = runOriginal.match(/\s+$/);
     const runTrail = trailMatch ? trailMatch[0] : '';
@@ -688,7 +707,36 @@ class AutocorrectEngine extends EventEmitter {
     st.count += 1;
     st.last = now;
     this.wordState[key] = st;
+    this._pruneWordState();
     this.settings.set('acWordState', this.wordState);
+  }
+
+  // Bound the persisted rejection map. Entries that are BELOW the permanent
+  // threshold (count < 3) and older than the suppression window already have
+  // no effect on _isSuppressed(), so dropping them changes no behavior. A hard
+  // cap on top of that guards against the pathological case of thousands of
+  // distinct permanently-suppressed words. Returns true if anything changed.
+  // The size guard keeps this a no-op on every normal-sized map (no cost in
+  // the common case).
+  _pruneWordState() {
+    const keys = Object.keys(this.wordState);
+    if (keys.length < 500) return false;
+    const now = Date.now();
+    let changed = false;
+    for (const k of keys) {
+      const st = this.wordState[k];
+      if (!st || (st.count < 3 && (now - (st.last || 0)) >= WORD_SUPPRESS_MS)) {
+        delete this.wordState[k];
+        changed = true;
+      }
+    }
+    const MAX = 5000;
+    const left = Object.keys(this.wordState);
+    if (left.length > MAX) {
+      left.sort((a, b) => (this.wordState[a].last || 0) - (this.wordState[b].last || 0));
+      for (let i = 0; i < left.length - MAX; i++) { delete this.wordState[left[i]]; changed = true; }
+    }
+    return changed;
   }
 
   _isSuppressed(word) {
