@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const autocorrectToggle = document.getElementById('autocorrectToggle');
   const autoNotifySelect = document.getElementById('autoNotifySelect');
   const showManualToastToggle = document.getElementById('showManualToastToggle');
+  const manualSoundToggle = document.getElementById('manualSoundToggle');
   const primaryLangSelect = document.getElementById('primaryLangSelect');
   const launchAtLoginToggle = document.getElementById('launchAtLoginToggle');
   const shortcutCapture = document.getElementById('shortcutCapture');
@@ -85,6 +86,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   autocorrectToggle.checked = s.autocorrectEnabled !== false;
   autoNotifySelect.value = notifyModeFromSettings(s);
   showManualToastToggle.checked = s.showManualToast !== false;
+  manualSoundToggle.checked = s.manualSound !== false;
   primaryLangSelect.value = s.primaryLang || 'he';
   launchAtLoginToggle.checked = s.launchAtLogin !== false;
   shortcutCapture.textContent = s.manualShortcut || 'Alt+Shift+J';
@@ -99,6 +101,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     ks.setSetting('autoSound', mode === 'sound');
   });
   showManualToastToggle.addEventListener('change', () => ks.setSetting('showManualToast', showManualToastToggle.checked));
+  manualSoundToggle.addEventListener('change', () => ks.setSetting('manualSound', manualSoundToggle.checked));
   primaryLangSelect.addEventListener('change', () => ks.setSetting('primaryLang', primaryLangSelect.value));
   launchAtLoginToggle.addEventListener('change', () => ks.setSetting('launchAtLogin', launchAtLoginToggle.checked));
 
@@ -166,6 +169,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       ks.getSettings().then((cur) => { autoNotifySelect.value = notifyModeFromSettings(cur); });
     }
     if (key === 'showManualToast') showManualToastToggle.checked = value !== false;
+    if (key === 'manualSound') manualSoundToggle.checked = value !== false;
     if (key === 'primaryLang') primaryLangSelect.value = value || 'he';
     if (key === 'launchAtLogin') launchAtLoginToggle.checked = value !== false;
     if (key === 'manualShortcut') { shortcutCapture.textContent = value; shortcutHint.textContent = value; }

@@ -28,6 +28,10 @@ const DEFAULTS = {
   // Manual-shortcut toast is OFF by default: pressing the shortcut is an
   // explicit, deliberate action, so a confirmation popup every time is noise.
   showManualToast: false,
+  // A short chime after a manual conversion IS on by default: it's unobtrusive
+  // audible confirmation that the shortcut worked, useful precisely because the
+  // manual toast is off.
+  manualSound: true,
   autoSound: true,
   primaryLang: 'he',
   manualShortcut: 'Alt+Shift+J',
