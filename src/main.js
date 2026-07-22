@@ -6,7 +6,7 @@
 // =============================================================================
 'use strict';
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, globalShortcut, clipboard, screen, shell, session } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, globalShortcut, clipboard, screen, shell, session, powerMonitor } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -125,10 +125,26 @@ function init() {
     broadcast('settings:changed', { key, value });
   });
 
+  // If this launch is the relaunch right after a background auto-update, the
+  // installer ran us with no --hidden flag; consume the marker and stay hidden
+  // in the tray so a silent update doesn't pop a window in the user's face.
+  let relaunchedFromUpdate = false;
+  try {
+    const marker = updateMarkerPath();
+    if (fs.existsSync(marker)) {
+      // Only treat it as a post-update relaunch if the marker is fresh; a stale
+      // one (left by a crash between writing it and installing) must not suppress
+      // the window forever. Either way, consume it.
+      const ts = Number(fs.readFileSync(marker, 'utf8')) || 0;
+      if (Date.now() - ts < 5 * 60 * 1000) relaunchedFromUpdate = true;
+      fs.unlinkSync(marker);
+    }
+  } catch (e) {}
+
   // First run after install (the installer launches us via runAfterFinish):
   // show the styled welcome/onboarding screen once instead of the settings
   // window. On every later launch, behave normally.
-  if (!START_HIDDEN) {
+  if (!START_HIDDEN && !relaunchedFromUpdate) {
     if (settings.get('welcomeShown') !== true) showWelcomeWindow();
     else showSettingsWindow();
   }
@@ -369,17 +385,39 @@ function refreshTrayMenu() {
 // AUTO-UPDATE (electron-updater against GitHub Releases)
 // ---------------------------------------------------------------------------
 // On every launch (and every 6 hours after) the app checks the repo's GitHub
-// Releases for a newer version, downloads it in the background, and installs it
-// the next time the app quits — so users are NOT stuck forever on whatever
-// version they first downloaded. A tray item also lets them check on demand or
-// restart-to-update immediately once one is ready.
+// Releases for a newer version and downloads it in the background. Installing
+// it is the part that has to be handled carefully for a TRAY app: relying on
+// `autoInstallOnAppQuit` alone means the update only lands when the process
+// fully exits — but a tray app launched at login almost never exits (closing
+// the window just hides it), so the downloaded update would sit unused for
+// days and the user sees "a new version was found" but never actually gets it.
+//
+// So once an update is downloaded we install it automatically the moment the
+// machine is IDLE (the user stepped away), silently, and relaunch hidden so
+// the whole thing is seamless — the user simply comes back to the new version
+// already running in the tray. `autoInstallOnAppQuit` stays on as a fallback
+// for the shutdown/restart/exit paths.
 //
 // Requires the build to publish `latest.yml` next to the installer in each
 // GitHub Release (the CI workflow uploads it), and the `publish` block in
 // package.json. In an unpacked/dev run (`app.isPackaged === false`) the updater
-// is skipped, because there is no code signature or app-update.yml to read.
+// is skipped, because there is no app-update.yml to read.
 let autoUpdater = null;
 let manualUpdateCheck = false;
+let idleInstallTimer = null;
+let installingUpdate = false;
+
+// How long the machine must be idle before we auto-install a ready update, and
+// how often we check. Conservative so we never yank the app out from under
+// someone who's just reading — only when they've clearly stepped away.
+const IDLE_INSTALL_SECS = 120;
+const IDLE_POLL_MS = 30 * 1000;
+// Marker file: written just before we quit to install, so the freshly-relaunched
+// instance knows to start HIDDEN (straight to the tray) instead of popping the
+// settings window after a silent background update.
+function updateMarkerPath() {
+  return path.join(app.getPath('userData'), '.ks-updating');
+}
 
 function setupAutoUpdate() {
   if (!app.isPackaged) return;
@@ -389,6 +427,7 @@ function setupAutoUpdate() {
     autoUpdater.autoInstallOnAppQuit = true;
 
     autoUpdater.on('update-available', (info) => {
+      console.log('[KeySwitch] update available:', info && info.version);
       if (manualUpdateCheck) {
         showToast({ type: 'info', text: `גרסה ${info.version} נמצאה — מורידה ברקע...` });
       }
@@ -403,7 +442,9 @@ function setupAutoUpdate() {
       updateReady = true;
       manualUpdateCheck = false;
       refreshTrayMenu();
-      showToast({ type: 'info', text: `גרסה ${info.version} מוכנה — תותקן ביציאה מהתוכנה` });
+      showToast({ type: 'info', text: `גרסה ${info.version} תותקן אוטומטית — או עכשיו מהתפריט` });
+      console.log('[KeySwitch] update downloaded:', info && info.version);
+      startIdleInstallWatch();
     });
     autoUpdater.on('error', (err) => {
       if (manualUpdateCheck) {
@@ -422,6 +463,45 @@ function setupAutoUpdate() {
   }
 }
 
+// Once an update is ready, watch for the user to step away and install it then.
+function startIdleInstallWatch() {
+  if (idleInstallTimer) return;
+  idleInstallTimer = setInterval(() => {
+    if (!updateReady || installingUpdate) return;
+    let idle = 0;
+    try { idle = powerMonitor.getSystemIdleTime(); } catch (e) { return; }
+    // Don't interrupt an in-flight manual conversion even if input is briefly idle.
+    if (idle >= IDLE_INSTALL_SECS && !manualBusy) {
+      performUpdateInstall(true);
+    }
+  }, IDLE_POLL_MS);
+}
+
+// Quit and install the downloaded update. `silent` (idle auto-install) runs the
+// NSIS installer with no UI and relaunches hidden; the manual tray action uses
+// silent=false so the user sees the familiar installer progress.
+function performUpdateInstall(silent) {
+  if (!autoUpdater || !updateReady || installingUpdate) return;
+  installingUpdate = true;
+  if (idleInstallTimer) { clearInterval(idleInstallTimer); idleInstallTimer = null; }
+  app.isQuitting = true;
+  try {
+    // Leave a marker so the relaunched instance starts straight into the tray
+    // (hidden) rather than opening a window after a background update.
+    fs.writeFileSync(updateMarkerPath(), String(Date.now()));
+  } catch (e) {}
+  try {
+    autoUpdater.quitAndInstall(silent, true); // isSilent, isForceRunAfter
+  } catch (e) {
+    console.error('[KeySwitch] quitAndInstall failed:', e);
+    installingUpdate = false;
+    app.isQuitting = false;
+    try { fs.unlinkSync(updateMarkerPath()); } catch (e2) {}
+    if (silent) startIdleInstallWatch(); // idle path: try again later
+    else showToast({ type: 'info', text: 'ההתקנה נכשלה — נסו שוב מאוחר יותר' });
+  }
+}
+
 function checkForUpdatesManually() {
   if (!app.isPackaged) {
     showToast({ type: 'info', text: 'בדיקת עדכונים זמינה רק בגרסה המותקנת' });
@@ -435,10 +515,8 @@ function checkForUpdatesManually() {
 }
 
 function quitAndInstallUpdate() {
-  if (!autoUpdater) return;
-  app.isQuitting = true;
-  // isSilent=false (show the installer), isForceRunAfter=true (relaunch after).
-  autoUpdater.quitAndInstall(false, true);
+  // Manual "install now" from the tray: show the installer UI (silent=false).
+  performUpdateInstall(false);
 }
 
 // ---------------------------------------------------------------------------
