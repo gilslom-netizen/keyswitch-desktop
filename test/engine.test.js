@@ -520,6 +520,60 @@ test('engine: English word with q typed on the Hebrew layout keeps its first let
   assert.strictEqual(native.calls.backspaces, 9); // '/וקדאןםמ' + trailing space
 });
 
+test('engine: English word ending in q on the Hebrew layout keeps its last letter', () => {
+  // "iraq" on the Hebrew layout is "ןרש/" — the trailing q lives on the '/'
+  // key. classify() already resolves the other letters to 'wrong' via a
+  // misplaced Hebrew final letter (ן not at the true end) WITHOUT ever
+  // looking at the '/', so the fix must still fold the '/' into the run or
+  // it's dropped from the correction, leaving a stray '/' on screen.
+  const keymapK = keymap.UiohookKey;
+  const native = makeFakeNative({ layout: 'he' });
+  const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
+
+  for (const k of [keymapK.I, keymapK.R, keymapK.A, keymapK.Q]) pressKey(engine, k);
+  pressKey(engine, keymapK.Space);
+
+  assert.strictEqual(native.calls.typed, 'Iraq '); // single word → capitalized
+  assert.strictEqual(native.calls.backspaces, 5); // 'ןרש/' + trailing space
+});
+
+test('engine: an out-of-dictionary word followed by real punctuation is left alone', () => {
+  // Regression for "the sound plays even when nothing needed fixing": a
+  // word not in either dictionary, glued to an ordinary comma/period the
+  // user typed on purpose, must NOT be treated as a layout mistake just
+  // because it happens to be unrecognized. Only a word that is a genuine
+  // dictionary hit as EXACTLY plain+punctuation triggers a fix (see the
+  // "typed through punctuation keys" tests above) — an unrecognized word
+  // stays 'unknown' and is left untouched, comma and all.
+  const keymapK = keymap.UiohookKey;
+  const native = makeFakeNative({ layout: 'en' });
+  const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
+
+  for (const k of [keymapK.X, keymapK.E, keymapK.R, keymapK.O, keymapK.X]) pressKey(engine, k);
+  pressKey(engine, keymapK.Comma);
+  pressKey(engine, keymapK.Space);
+
+  assert.strictEqual(native.calls.typed, '', 'an unrecognized word + real punctuation must not be "corrected"');
+});
+
+test('engine: two real words joined only by a comma are not merged into one token', () => {
+  // Regression for the tokenizer over-capture this session's punctuation fix
+  // could have introduced: without a space, "hi,mom" must NOT be scanned as
+  // one combined run (which could coincidentally flip to something bogus) —
+  // the comma is a genuine boundary here since a real word ("mom") sits
+  // right on its far side.
+  const keymapK = keymap.UiohookKey;
+  const native = makeFakeNative({ layout: 'en' });
+  const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
+
+  for (const k of [keymapK.H, keymapK.I]) pressKey(engine, k);
+  pressKey(engine, keymapK.Comma);
+  for (const k of [keymapK.M, keymapK.O, keymapK.M]) pressKey(engine, k);
+  pressKey(engine, keymapK.Space);
+
+  assert.strictEqual(native.calls.typed, '', 'hi,mom must not be reinterpreted as one gibberish token');
+});
+
 test('engine: a follow-up opposite-direction fix never re-flips the previous correction', () => {
   // Corruption regression: user types "akuo" → corrected to "שלום" and the
   // layout flips to Hebrew. They keep typing "hello", which now lands as

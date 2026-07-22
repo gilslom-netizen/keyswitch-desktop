@@ -62,15 +62,22 @@ const MAX_EVENT_LAG_MS = 150;
 // the app restarts (the "sometimes it just stops correcting" bug).
 const LAG_RECAL_MS = 2000;
 
-// ',' '.' '/' ';' are word characters here because those physical keys TYPE
-// LETTERS on the opposite layout (ת ץ . ף on Hebrew; the '/' key is q when
-// flipped back to English) — excluding them cut real letters off the token
-// and the run, so words like זאת ("zt,"), כיף ("fh;") and question
-// ("/וקדאןםמ") were extracted truncated and never corrected (or corrected
-// with their first key dropped). classify() is conservative — a token whose
-// extra punctuation is genuine punctuation simply stays 'unknown'.
-const isWordChar = (c) => c != null && /[A-Za-z֐-׿0-9',./;]/.test(c);
+const isWordChar = (c) => c != null && /[A-Za-z֐-׿0-9']/.test(c);
 const isBoundaryChar = (c) => c != null && !isWordChar(c);
+
+// ',' '.' '/' ';' physically TYPE LETTERS on the opposite layout (ת ץ . ף on
+// Hebrew; '/' is q when flipped back to English) — a word like זאת ("zt,"),
+// כיף ("fh;") or question ("/וקדאןםמ") needs one of these glued to it to be
+// complete. But they are NOT permanent word characters (see isWordChar
+// above): treating them as such would let the scanner cross straight through
+// a real boundary — two ordinary words typed without a space, "wait,ok",
+// would merge into one nonsense token instead of staying two separate,
+// correctly-classified words. Instead evaluate() tries the plain letters-only
+// word first and only ever considers ONE such character, glued to exactly
+// ONE edge, as a fallback — see the "punctuation-letter fallback" comment
+// there for why that also guards against misreading ordinary punctuation
+// ("wait," / "nice.") as part of the word.
+const PUNCT_EXT_CHARS = ',./;';
 
 // Where should the re-converted block start? Identical semantics to the
 // extension's computeRunStart: never re-flip a word the user already typed
@@ -450,19 +457,85 @@ class AutocorrectEngine extends EventEmitter {
     if (this.hardOff && this.hardOff.windowId === this.windowId && now < this.hardOff.until) return;
 
     const buf = this.buffer;
-    const coreEnd = buf.replace(/\s+$/, '').length;
-    if (coreEnd === 0) return;
+    const rawEnd = buf.replace(/\s+$/, '').length;
+    if (rawEnd === 0) return;
+
+    // A single ',' '.' ';' '/' glued to the word may be the final/initial
+    // LETTER of an intended Hebrew word (see PUNCT_EXT_CHARS above) — but it
+    // is tried only as a FALLBACK, one character, on one edge, and only when
+    // the plain letters-only word doesn't already explain itself. This is
+    // what keeps ordinary punctuation silent: "wait," classifies "wait" as a
+    // real word first and stops right there, never even looking at the comma;
+    // only a word that is NOT in any dictionary on its own (so it would
+    // otherwise sit there unrecognized) ever gets the punctuation folded in,
+    // and even then only if the result is a real dictionary word.
+    const trailPunct = PUNCT_EXT_CHARS.indexOf(buf[rawEnd - 1]) >= 0 ? buf[rawEnd - 1] : null;
+    const coreEnd = trailPunct ? rawEnd - 1 : rawEnd;
+
     let start = coreEnd;
     while (start > 0 && isWordChar(buf[start - 1])) start--;
-    if (start >= coreEnd) return;
-    const word = buf.slice(start, coreEnd);
-    if (this._isSuppressed(word)) return;
+    if (start >= coreEnd && !trailPunct) return;
+
+    const plainWord = buf.slice(start, coreEnd);
+    // The leading counterpart is a genuine boundary only if nothing of the
+    // same kind (letter or another such punctuation mark) sits just beyond
+    // it — otherwise "hi,mom" would have its comma treated as mom's initial
+    // letter while still being glued to an unrelated word on the other side.
+    const leadChar = start > 0 ? buf[start - 1] : null;
+    const leadPunct = (leadChar && PUNCT_EXT_CHARS.indexOf(leadChar) >= 0 &&
+      (start < 2 || (!isWordChar(buf[start - 2]) && PUNCT_EXT_CHARS.indexOf(buf[start - 2]) < 0)))
+      ? leadChar : null;
 
     const capsOn = this.native.isCapsLockOn();
-    const decision = this._decideCorrection(word, capsOn);
+    let word = plainWord;
+    let wordStart = start;
+    let wordEnd = coreEnd;
+    let cls = plainWord ? dict.classify(plainWord, capsOn) : { kind: 'unknown' };
+
+    if (cls.kind === 'unknown') {
+      // Require the extended flip to resolve to a REAL word of 3+ letters: a
+      // coincidental 2-letter match (a stray "c," landing on some short real
+      // word) is far likelier to be noise than an intentional mistake, and
+      // classify() itself already only ever returns 'wrong' for a genuine
+      // dictionary hit — this length floor just adds margin against short
+      // accidental collisions on top of that.
+      if (trailPunct) {
+        const extWord = plainWord + trailPunct;
+        const extCls = dict.classify(extWord, capsOn);
+        if (extCls.kind === 'wrong' && extWord.length >= 3) {
+          word = extWord; wordStart = start; wordEnd = rawEnd; cls = extCls;
+        }
+      }
+      if (cls.kind === 'unknown' && leadPunct) {
+        const extWord = leadPunct + plainWord;
+        const extCls = dict.classify(extWord, capsOn);
+        if (extCls.kind === 'wrong' && extWord.length >= 3) {
+          word = extWord; wordStart = start - 1; wordEnd = coreEnd; cls = extCls;
+        }
+      }
+    }
+
+    // '/' is the ONE punctuation mark that can appear on the he2en side for a
+    // reason unrelated to the fallback above: it's what the Hebrew layout's Q
+    // key physically produces, so it can sit at either edge of an English
+    // word that has a leading/trailing 'q' (e.g. "question", "iraq"). classify()
+    // often already resolves such a run to 'wrong' from the OTHER letters
+    // alone (typically via a Hebrew final letter landing mid-word) without
+    // ever looking at the '/' — so, unlike the fallback above, this check
+    // runs even when cls is already 'wrong', or the fix would silently erase
+    // everything except the letter the '/' represents. The boundary-safety
+    // check on leadPunct/trailPunct is what still keeps this from swallowing
+    // an unrelated adjacent word.
+    if (cls.kind === 'wrong' && cls.direction === 'he2en') {
+      if (trailPunct === '/' && wordEnd === coreEnd) { wordEnd = rawEnd; word = word + '/'; }
+      if (leadPunct === '/' && wordStart === start) { wordStart = start - 1; word = '/' + word; }
+    }
+
+    if (this._isSuppressed(word)) return;
+    const decision = this._applyConfidenceGate(cls);
     if (!decision) return;
 
-    let runStart = computeRunStart(buf, 0, coreEnd, decision.direction);
+    let runStart = computeRunStart(buf, 0, wordEnd, decision.direction);
     // Never drag a PREVIOUS correction's output back into the run. computeRunStart
     // stops at correctly-typed OPPOSITE-script words, but a prior fix's text is in
     // the SAME script we're now converting FROM (e.g. after "akuo"→"שלום" the user
@@ -473,9 +546,9 @@ class AutocorrectEngine extends EventEmitter {
     // doesn't block — this clamp is what protects the fixed text in that case.
     if (this.lastFix) {
       const fixedEnd = this.lastFix.runStart + this.lastFix.converted.length;
-      if (runStart < fixedEnd && fixedEnd <= start) {
+      if (runStart < fixedEnd && fixedEnd <= wordStart) {
         runStart = fixedEnd;
-        while (runStart < coreEnd && /\s/.test(buf[runStart])) runStart++;
+        while (runStart < wordEnd && /\s/.test(buf[runStart])) runStart++;
       }
     }
     const runOriginal = buf.slice(runStart);
@@ -488,8 +561,13 @@ class AutocorrectEngine extends EventEmitter {
     this._applyFix({ runStart, runOriginal, runCore, runTrail, runConverted, decision, word, capsOn });
   }
 
-  _decideCorrection(word, capsActive) {
-    const cls = dict.classify(word, capsActive);
+  // Confidence-window gate. Takes an already-computed classify() result
+  // (never re-derives it) because the window itself is stateful — evaluate()
+  // may need to try several candidate classifications (plain word, then a
+  // punctuation-extended fallback) before settling on one, and only the FINAL
+  // winner may ever touch this window; scoring an intermediate candidate
+  // would corrupt the confidence history with a result that was discarded.
+  _applyConfidenceGate(cls) {
     if (cls.kind === 'unknown') return null;
 
     let vst = this.confidence.get(this.windowId);
