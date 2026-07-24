@@ -574,6 +574,59 @@ test('engine: two real words joined only by a comma are not merged into one toke
   assert.strictEqual(native.calls.typed, '', 'hi,mom must not be reinterpreted as one gibberish token');
 });
 
+test('engine: a 2-letter first word with no left context is never "corrected" (תיעUS class)', () => {
+  // "וד" (U,S on the Hebrew layout) flips to the English word "us", but as the
+  // very first word of a run the engine can't prove it isn't the tail of a
+  // longer on-screen word (e.g. the end of "תיעוד"). It must be left alone —
+  // otherwise "תיעוד" becomes "תיעUS". Two-letter fragments are the largest
+  // collision class, so a first-word length floor kills them outright.
+  const keymapK = keymap.UiohookKey;
+  const native = makeFakeNative({ layout: 'he' });
+  const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
+
+  for (const k of [keymapK.U, keymapK.S]) pressKey(engine, k); // ו ד
+  pressKey(engine, keymapK.Space);
+  assert.strictEqual(native.calls.typed, '', 'a 2-letter first-word fragment must not trigger a fix');
+});
+
+test('engine: an in-place resume mid-word never corrects the suffix, even for 3+ letters', () => {
+  // The reported bug's exact mechanism: a >15s pause (or a post-correction
+  // glitch) reset the run partway through a word the user is still typing, so
+  // the run now begins at that word's SUFFIX. The caret hasn't moved, so this
+  // "word" — however long — must never be treated as a standalone mistake.
+  const keymapK = keymap.UiohookKey;
+  const native = makeFakeNative({ layout: 'en' });
+  const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
+
+  // lastKeyTime non-zero => the user HAD been typing; the long gap is a resume
+  // in place (not the fresh first keystroke after app start, which stays live).
+  engine.lastKeyTime = Date.now() - 20000;
+  for (const k of [keymapK.A, keymapK.K, keymapK.U, keymapK.O]) pressKey(engine, k); // 4 letters
+  pressKey(engine, keymapK.Space);
+  assert.strictEqual(native.calls.typed, '', 'the first word after an in-place resume is held');
+});
+
+test('engine: after an in-place resume the suspect first token is never swept into a later run', () => {
+  // Holding the first word is not enough on its own — a later word\'s
+  // conversion run could start at index 0 and drag the un-modeled fragment
+  // back in, corrupting it anyway. The fragment before the first observed
+  // space must stay sealed for the whole run.
+  const keymapK = keymap.UiohookKey;
+  const native = makeFakeNative({ layout: 'en' });
+  const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
+
+  engine.lastKeyTime = Date.now() - 20000; // in-place resume
+  for (const k of [keymapK.A, keymapK.K, keymapK.U, keymapK.O]) pressKey(engine, k);
+  pressKey(engine, keymapK.Space); // first (suspect) token — held
+  assert.strictEqual(native.calls.typed, '', 'first token held');
+
+  for (const k of [keymapK.A, keymapK.K, keymapK.U, keymapK.O]) pressKey(engine, k);
+  pressKey(engine, keymapK.Space); // a real, boundary-aligned word — corrects
+  assert.strictEqual(native.calls.typed, 'שלום ', 'only the boundary-aligned word converts');
+  assert.strictEqual(native.calls.backspaces, 5, 'the run never reaches back into the sealed token');
+  assert.strictEqual(engine.buffer, 'akuo שלום ', 'the suspect token is left exactly as typed');
+});
+
 test('engine: a follow-up opposite-direction fix never re-flips the previous correction', () => {
   // Corruption regression: user types "akuo" → corrected to "שלום" and the
   // layout flips to Hebrew. They keep typing "hello", which now lands as

@@ -113,6 +113,13 @@ class AutocorrectEngine extends EventEmitter {
     this.lastKeyTime = 0;
     this.ignoreUntil = 0;
     this._injectGuard = null;
+    // True when the current run began from an IN-PLACE resume — a reset where
+    // the caret provably did NOT move (a >FRESH_GAP pause, or a post-correction
+    // inject-guard timeout) rather than a deliberate relocation (click, nav,
+    // window switch). After such a resume the run's first "word" may actually
+    // be the SUFFIX of a word the user is still typing on screen, so it must
+    // not be "corrected" (see the first-word guard in evaluate()).
+    this._coldResume = false;
     // Calibration for _eventLag(): minimum observed skew between our clock
     // and the hook thread's event timestamps (which use an arbitrary base —
     // milliseconds since boot on Windows), plus the start time of the current
@@ -193,6 +200,11 @@ class AutocorrectEngine extends EventEmitter {
     // return to the field" bug. A fresh burst must start with a clean slate so
     // detection is always live.
     this.confidence.clear();
+    // Every reset is "clean" (a fresh, boundary-aligned start) by default; the
+    // two in-place-resume call sites re-set this to true immediately after
+    // calling resetRun(). A deliberate relocation (click/nav/window switch)
+    // therefore always leaves it false, so switch-and-type keeps working.
+    this._coldResume = false;
     this._endFixTracking();
   }
 
@@ -320,10 +332,13 @@ class AutocorrectEngine extends EventEmitter {
       if (now > g.until) {
         // Echoes never (fully) arrived — event-loop stall or another hook
         // interfered. The screen can no longer be trusted: drop the run and
-        // process this event as fresh input.
+        // process this event as fresh input. This is an in-place resume (the
+        // caret didn't move — we glitched mid-burst right after a correction),
+        // so the run that follows may be starting partway through a word.
         this._injectGuard = null;
         this.ignoreUntil = 0;
         this.resetRun();
+        this._coldResume = true;
       } else if (e.keycode === keymap.UiohookKey.Backspace && g.backspaces > 0) {
         if (g.unicode !== g.uniTotal) g.poisoned = true; // out-of-order echo — count is off
         g.backspaces--;
@@ -351,7 +366,16 @@ class AutocorrectEngine extends EventEmitter {
     if (keymap.MODIFIER_KEYS.has(e.keycode)) return;
 
     this._syncWindow();
-    if (now - this.lastKeyTime > FRESH_GAP) this.resetRun();
+    if (now - this.lastKeyTime > FRESH_GAP) {
+      // A gap this long ended the previous run. If the user had been typing
+      // before (lastKeyTime !== 0), the caret is still exactly where they left
+      // it — possibly mid-word — so this is an in-place resume. The very first
+      // keystroke after app start (lastKeyTime === 0) is NOT a resume: the
+      // field is fresh, so a first-word correction there stays allowed.
+      const wasResume = this.lastKeyTime !== 0;
+      this.resetRun();
+      if (wasResume) this._coldResume = true;
+    }
     this.lastKeyTime = now;
 
     // Shortcuts select/paste/undo/jump — the run model no longer matches the
@@ -532,6 +556,25 @@ class AutocorrectEngine extends EventEmitter {
     }
 
     if (this._isSuppressed(word)) return;
+
+    // First-word safety. The engine can't read the screen, so for the FIRST
+    // word of a run (nothing modeled to its left) it cannot know whether more
+    // letters precede it on screen. If a mid-word reset started this run
+    // partway through a word the user is still typing, this "word" is really
+    // that word's SUFFIX — and short Hebrew suffixes flip to real English
+    // words ("וד"→"us", "ין"→"in", …), so "correcting" one turns an on-screen
+    // "תיעוד" into "תיעUS". Guard the first word only (later words in the run
+    // sit after an observed space, so their left edge is known):
+    //   * right after an in-place resume, never touch it — highest fragment risk;
+    //   * otherwise require ≥3 letters, so a 2-letter accidental fragment
+    //     (the largest and most collision-prone class) can never trigger.
+    // A word with an observed boundary before it (wordStart > 0) keeps full
+    // sensitivity, including 2-letter corrections.
+    if (cls.kind === 'wrong' && wordStart === 0) {
+      const letters = word.replace(/[^A-Za-z֐-׿]/g, '').length;
+      if (this._coldResume || letters < 3) return;
+    }
+
     const decision = this._applyConfidenceGate(cls);
     if (!decision) return;
 
@@ -549,6 +592,21 @@ class AutocorrectEngine extends EventEmitter {
       if (runStart < fixedEnd && fixedEnd <= wordStart) {
         runStart = fixedEnd;
         while (runStart < wordEnd && /\s/.test(buf[runStart])) runStart++;
+      }
+    }
+    // Seal the suspect fragment after an in-place resume. Holding the first
+    // word (above) isn't enough on its own: a LATER word's run can still start
+    // at index 0 and sweep that un-modeled fragment back in — e.g. the held
+    // "וד" of "תיעוד" would be dragged into the next word's conversion and
+    // corrupted anyway. So while cold, no run may begin before the first
+    // OBSERVED boundary; everything to its left is the unknown-context
+    // fragment and stays untouched for the life of the run.
+    if (this._coldResume) {
+      const sp = buf.search(/\s/);
+      if (sp >= 0) {
+        let cf = sp + 1;
+        while (cf < wordEnd && /\s/.test(buf[cf])) cf++;
+        if (runStart < cf) runStart = cf;
       }
     }
     const runOriginal = buf.slice(runStart);
