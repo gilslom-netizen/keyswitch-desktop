@@ -589,25 +589,54 @@ test('engine: a 2-letter first word with no left context is never "corrected" (�
   assert.strictEqual(native.calls.typed, '', 'a 2-letter first-word fragment must not trigger a fix');
 });
 
+// Simulate a long typing pause. `midWord` decides what the caret was left
+// sitting on: true = the previous run stopped partway through a word (so
+// whatever is typed next continues it), false = it stopped on a boundary.
+function pauseTyping(engine, { midWord }) {
+  const keymapK = keymap.UiohookKey;
+  if (midWord) {
+    for (const k of [keymapK.X, keymapK.K, keymapK.C]) pressKey(engine, k); // letters, no space
+  }
+  engine.lastKeyTime = Date.now() - 20000; // > FRESH_GAP
+}
+
 test('engine: an in-place resume mid-word never corrects the suffix, even for 3+ letters', () => {
-  // The reported bug's exact mechanism: a >15s pause (or a post-correction
-  // glitch) reset the run partway through a word the user is still typing, so
-  // the run now begins at that word's SUFFIX. The caret hasn't moved, so this
-  // "word" — however long — must never be treated as a standalone mistake.
+  // The תיעוד→תיעUS mechanism: a >15s pause (or a post-correction glitch)
+  // reset the run partway through a word the user is still typing, so the run
+  // now begins at that word's SUFFIX. The caret hasn't moved, so this "word" —
+  // however long — must never be treated as a standalone mistake.
   const keymapK = keymap.UiohookKey;
   const native = makeFakeNative({ layout: 'en' });
   const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
 
-  // lastKeyTime non-zero => the user HAD been typing; the long gap is a resume
-  // in place (not the fresh first keystroke after app start, which stays live).
-  engine.lastKeyTime = Date.now() - 20000;
+  pauseTyping(engine, { midWord: true });
   for (const k of [keymapK.A, keymapK.K, keymapK.U, keymapK.O]) pressKey(engine, k); // 4 letters
   pressKey(engine, keymapK.Space);
-  assert.strictEqual(native.calls.typed, '', 'the first word after an in-place resume is held');
+  assert.strictEqual(native.calls.typed, '', 'the first word after a mid-word resume is held');
+});
+
+test('engine: a pause on a word BOUNDARY still corrects the next word (,rh. = תריץ)', () => {
+  // Counterpart to the test above, and the regression the over-broad version
+  // of that guard caused: pausing between words (or before typing anything at
+  // all) leaves the caret on a boundary, so the next token is a whole word and
+  // must stay fully correctable. ",rh." is תריץ — note it also depends on
+  // BOTH its punctuation-typed letters (ת from ',' and ץ from '.') and on the
+  // length floor counting the intended word's letters rather than the raw
+  // keystrokes, which is what previously held it back.
+  const keymapK = keymap.UiohookKey;
+  const native = makeFakeNative({ layout: 'en' });
+  const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
+
+  pauseTyping(engine, { midWord: false });
+  for (const k of [keymapK.Comma, keymapK.R, keymapK.H, keymapK.Period]) pressKey(engine, k);
+  pressKey(engine, keymapK.Space);
+
+  assert.strictEqual(native.calls.typed, 'תריץ ');
+  assert.strictEqual(native.calls.backspaces, 5); // ',rh.' + trailing space
 });
 
 test('engine: after an in-place resume the suspect first token is never swept into a later run', () => {
-  // Holding the first word is not enough on its own — a later word\'s
+  // Holding the first word is not enough on its own — a later word's
   // conversion run could start at index 0 and drag the un-modeled fragment
   // back in, corrupting it anyway. The fragment before the first observed
   // space must stay sealed for the whole run.
@@ -615,7 +644,7 @@ test('engine: after an in-place resume the suspect first token is never swept in
   const native = makeFakeNative({ layout: 'en' });
   const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
 
-  engine.lastKeyTime = Date.now() - 20000; // in-place resume
+  pauseTyping(engine, { midWord: true });
   for (const k of [keymapK.A, keymapK.K, keymapK.U, keymapK.O]) pressKey(engine, k);
   pressKey(engine, keymapK.Space); // first (suspect) token — held
   assert.strictEqual(native.calls.typed, '', 'first token held');
@@ -625,6 +654,25 @@ test('engine: after an in-place resume the suspect first token is never swept in
   assert.strictEqual(native.calls.typed, 'שלום ', 'only the boundary-aligned word converts');
   assert.strictEqual(native.calls.backspaces, 5, 'the run never reaches back into the sealed token');
   assert.strictEqual(engine.buffer, 'akuo שלום ', 'the suspect token is left exactly as typed');
+});
+
+test('engine: common Hebrew words needing BOTH punctuation-typed letters are corrected', () => {
+  // 96 dictionary words flip to gibberish that begins AND ends with a
+  // punctuation-typed letter — תוספת is ",uxp,", תוכנית is ",ufbh,", תמליץ is
+  // ",nkh.". Trying only one edge at a time left every one of them
+  // undetected, and for a few (תשומת = ",aun,") a single edge hit a shorter
+  // word, which would have erased the word and stranded the leading comma.
+  const keymapK = keymap.UiohookKey;
+  const CH = { ',': keymapK.Comma, '.': keymapK.Period, ';': keymapK.Semicolon };
+  for (const [gibberish, expected] of [[',uxp,', 'תוספת'], [',ufbh,', 'תוכנית'],
+    [',nkh.', 'תמליץ'], [',mr;', 'תצרף'], [',aun,', 'תשומת']]) {
+    const native = makeFakeNative({ layout: 'en' });
+    const engine = new AutocorrectEngine({ native, settings: makeFakeSettings() });
+    for (const ch of gibberish) pressKey(engine, CH[ch] || keymapK[ch.toUpperCase()]);
+    pressKey(engine, keymapK.Space);
+    assert.strictEqual(native.calls.typed.trim(), expected, `${gibberish} must become ${expected}`);
+    assert.strictEqual(native.calls.backspaces, gibberish.length + 1, `${gibberish}: whole word erased`);
+  }
 });
 
 test('engine: a follow-up opposite-direction fix never re-flips the previous correction', () => {

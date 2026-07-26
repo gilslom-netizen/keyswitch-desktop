@@ -332,13 +332,14 @@ class AutocorrectEngine extends EventEmitter {
       if (now > g.until) {
         // Echoes never (fully) arrived — event-loop stall or another hook
         // interfered. The screen can no longer be trusted: drop the run and
-        // process this event as fresh input. This is an in-place resume (the
-        // caret didn't move — we glitched mid-burst right after a correction),
-        // so the run that follows may be starting partway through a word.
+        // process this event as fresh input. The caret didn't move, so — as in
+        // the typing-gap case — only a buffer that stopped mid-word means the
+        // next token continues a word already on screen.
+        const midWord = isWordChar(this.buffer[this.buffer.length - 1]);
         this._injectGuard = null;
         this.ignoreUntil = 0;
         this.resetRun();
-        this._coldResume = true;
+        this._coldResume = midWord;
       } else if (e.keycode === keymap.UiohookKey.Backspace && g.backspaces > 0) {
         if (g.unicode !== g.uniTotal) g.poisoned = true; // out-of-order echo — count is off
         g.backspaces--;
@@ -367,14 +368,18 @@ class AutocorrectEngine extends EventEmitter {
 
     this._syncWindow();
     if (now - this.lastKeyTime > FRESH_GAP) {
-      // A gap this long ended the previous run. If the user had been typing
-      // before (lastKeyTime !== 0), the caret is still exactly where they left
-      // it — possibly mid-word — so this is an in-place resume. The very first
-      // keystroke after app start (lastKeyTime === 0) is NOT a resume: the
-      // field is fresh, so a first-word correction there stays allowed.
-      const wasResume = this.lastKeyTime !== 0;
+      // A gap this long ends the previous run, and the caret stays where the
+      // user left it. Whether that is a problem depends on WHERE it was: only
+      // if the previous run stopped in the MIDDLE of a word does the text they
+      // now type continue that word (making the next token a suffix, the
+      // תיעוד→תיעUS hazard). The buffer tells us exactly — if its last
+      // character was part of a word, we were mid-word. If it ended with a
+      // space (or there was no run at all), the caret sits at a boundary and
+      // the next token is a whole word, so it stays fully correctable: this is
+      // the ordinary "pause, then type" case and must not be held back.
+      const midWord = isWordChar(this.buffer[this.buffer.length - 1]);
       this.resetRun();
-      if (wasResume) this._coldResume = true;
+      this._coldResume = midWord;
     }
     this.lastKeyTime = now;
 
@@ -517,24 +522,33 @@ class AutocorrectEngine extends EventEmitter {
     let cls = plainWord ? dict.classify(plainWord, capsOn) : { kind: 'unknown' };
 
     if (cls.kind === 'unknown') {
-      // Require the extended flip to resolve to a REAL word of 3+ letters: a
+      // Candidates are tried MOST-INCLUSIVE FIRST. Many very common Hebrew
+      // words need BOTH edges at once — תוספת is ",uxp,", תוכנית is ",ufbh,",
+      // תמליץ is ",nkh." — and neither single-edge slice of those is a word,
+      // so a trail-then-lead-only chain left all of them undetected. Worse,
+      // for a few (תשומת = ",aun,") a single-edge slice DOES hit a shorter
+      // word ("שומת"), which would fire a correction that erases the word but
+      // leaves the leading comma stranded on screen. Trying the both-edges
+      // candidate first resolves the whole word and avoids that partial fix.
+      //
+      // Each candidate must still resolve to a REAL word of 3+ letters: a
       // coincidental 2-letter match (a stray "c," landing on some short real
       // word) is far likelier to be noise than an intentional mistake, and
       // classify() itself already only ever returns 'wrong' for a genuine
       // dictionary hit — this length floor just adds margin against short
       // accidental collisions on top of that.
-      if (trailPunct) {
-        const extWord = plainWord + trailPunct;
-        const extCls = dict.classify(extWord, capsOn);
-        if (extCls.kind === 'wrong' && extWord.length >= 3) {
-          word = extWord; wordStart = start; wordEnd = rawEnd; cls = extCls;
-        }
+      const candidates = [];
+      if (leadPunct && trailPunct) {
+        candidates.push({ w: leadPunct + plainWord + trailPunct, s: start - 1, e: rawEnd });
       }
-      if (cls.kind === 'unknown' && leadPunct) {
-        const extWord = leadPunct + plainWord;
-        const extCls = dict.classify(extWord, capsOn);
-        if (extCls.kind === 'wrong' && extWord.length >= 3) {
-          word = extWord; wordStart = start - 1; wordEnd = coreEnd; cls = extCls;
+      if (trailPunct) candidates.push({ w: plainWord + trailPunct, s: start, e: rawEnd });
+      if (leadPunct) candidates.push({ w: leadPunct + plainWord, s: start - 1, e: coreEnd });
+      for (const c of candidates) {
+        if (c.w.length < 3) continue;
+        const extCls = dict.classify(c.w, capsOn);
+        if (extCls.kind === 'wrong') {
+          word = c.w; wordStart = c.s; wordEnd = c.e; cls = extCls;
+          break;
         }
       }
     }
@@ -571,7 +585,11 @@ class AutocorrectEngine extends EventEmitter {
     // A word with an observed boundary before it (wordStart > 0) keeps full
     // sensitivity, including 2-letter corrections.
     if (cls.kind === 'wrong' && wordStart === 0) {
-      const letters = word.replace(/[^A-Za-z֐-׿]/g, '').length;
+      // Count the letters of the INTENDED word, not of the raw keystrokes:
+      // ',' '.' ';' '/' each type a letter on the target layout, so measuring
+      // the raw token undercounts. ",rh." looks like 2 letters but is the
+      // 4-letter word "תריץ" — counting raw was what wrongly held it back.
+      const letters = dict.swapLayout(word, cls.direction).replace(/[^A-Za-z֐-׿]/g, '').length;
       if (this._coldResume || letters < 3) return;
     }
 
